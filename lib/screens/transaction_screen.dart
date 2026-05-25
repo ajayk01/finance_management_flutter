@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/app_data_cache.dart';
 import '../utils/currency_formatter.dart';
+import 'add_transaction_screen.dart';
 
 // ─── Data Models ─────────────────────────────────────────────
 
@@ -18,7 +19,8 @@ class Transaction {
   final Color iconColor;
   final Color iconBg;
   final String? avatarUrl;
-  final String account; // e.g. 'Chase Bank', 'Visa ••4521'
+  final String account;
+  final TransactionModel? model;
 
   const Transaction({
     required this.title,
@@ -30,6 +32,7 @@ class Transaction {
     required this.iconBg,
     this.avatarUrl,
     this.account = 'Chase Bank',
+    this.model,
   });
 
   String get typeLabel {
@@ -282,6 +285,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
                 ? const Color(0xFFE5E7EB)
                 : const Color(0xFFE0F2F1),
         account: tx.accountName ?? '',
+        model: tx,
       ));
     }
 
@@ -867,8 +871,111 @@ class _TransactionScreenState extends State<TransactionScreen> {
               ),
             ],
           ),
+          const SizedBox(width: 4),
+          // Actions popup
+          if (t.model != null)
+            PopupMenuButton<String>(
+              icon: Icon(Icons.more_vert, size: 20, color: Colors.grey.shade400),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'edit', child: Row(
+                  children: [
+                    Icon(Icons.edit_outlined, size: 18, color: Color(0xFF3B3BF9)),
+                    SizedBox(width: 8),
+                    Text('Edit'),
+                  ],
+                )),
+                const PopupMenuItem(value: 'copy', child: Row(
+                  children: [
+                    Icon(Icons.copy_outlined, size: 18, color: Color(0xFF6B7280)),
+                    SizedBox(width: 8),
+                    Text('Copy as New'),
+                  ],
+                )),
+                const PopupMenuItem(value: 'delete', child: Row(
+                  children: [
+                    Icon(Icons.delete_outline, size: 18, color: Color(0xFFEF4444)),
+                    SizedBox(width: 8),
+                    Text('Delete', style: TextStyle(color: Color(0xFFEF4444))),
+                  ],
+                )),
+              ],
+              onSelected: (action) {
+                switch (action) {
+                  case 'edit':
+                    _showEditDialog(t.model!);
+                    break;
+                  case 'copy':
+                    _copyTransaction(t.model!);
+                    break;
+                  case 'delete':
+                    _deleteTransaction(t.model!);
+                    break;
+                }
+              },
+            ),
         ],
       ),
     );
+  }
+
+  Future<void> _deleteTransaction(TransactionModel tx) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Transaction'),
+        content: Text('Delete "${tx.description}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      try {
+        await _api.deleteTransaction(tx.id);
+        _loadTransactions();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Transaction deleted')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Delete failed: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  void _copyTransaction(TransactionModel tx) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddTransactionScreen(prefill: tx),
+      ),
+    ).then((_) => _loadTransactions());
+  }
+
+  void _showEditDialog(TransactionModel tx) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddTransactionScreen(prefill: tx, isEdit: true),
+      ),
+    ).then((_) => _loadTransactions());
   }
 }

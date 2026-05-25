@@ -15,6 +15,7 @@ class SplitwiseScreen extends StatefulWidget {
 class _SplitwiseScreenState extends State<SplitwiseScreen> {
   final _api = ApiService();
   bool _loading = true;
+  bool _syncing = false;
   List<Map<String, dynamic>> _friends = [];
   String? _error;
 
@@ -47,6 +48,27 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
     }
   }
 
+  Future<void> _syncSplitwise() async {
+    setState(() => _syncing = true);
+    try {
+      await _api.syncSplitwise();
+      await _loadFriends();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Splitwise synced successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sync failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -60,6 +82,24 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
         backgroundColor: Colors.white,
         foregroundColor: const Color(0xFF1E293B),
         elevation: 0,
+        actions: [
+          IconButton(
+            onPressed: _syncing ? null : _syncSplitwise,
+            icon: _syncing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.sync_rounded, size: 22),
+            tooltip: 'Sync Splitwise',
+          ),
+          IconButton(
+            onPressed: _loading ? null : _loadFriends,
+            icon: const Icon(Icons.refresh_rounded, size: 22),
+            tooltip: 'Refresh',
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

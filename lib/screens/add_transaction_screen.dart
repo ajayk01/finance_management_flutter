@@ -4,7 +4,9 @@ import '../services/api_service.dart';
 import '../services/app_data_cache.dart';
 
 class AddTransactionScreen extends StatefulWidget {
-  const AddTransactionScreen({super.key});
+  final TransactionModel? prefill;
+  final bool isEdit;
+  const AddTransactionScreen({super.key, this.prefill, this.isEdit = false});
 
   @override
   State<AddTransactionScreen> createState() => _AddTransactionScreenState();
@@ -43,7 +45,66 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     super.initState();
     _loadCachedFormData();
     _loadFormData();
+    _applyPrefill();
   }
+
+  void _applyPrefill() {
+    final tx = widget.prefill;
+    if (tx == null) return;
+    switch (tx.type.toLowerCase()) {
+      case 'income':
+        _selectedType = 0;
+        break;
+      case 'expense':
+        _selectedType = 1;
+        break;
+      case 'transfer':
+        _selectedType = 2;
+        break;
+      case 'investment':
+        _selectedType = 3;
+        break;
+    }
+    _amount = tx.amount.toStringAsFixed(0);
+    _descController.text = tx.description;
+    try {
+      _selectedDate = DateTime.parse(tx.date);
+    } catch (_) {}
+    if (tx.time != null) {
+      final parts = tx.time!.split(':');
+      if (parts.length >= 2) {
+        _selectedTime = TimeOfDay(
+          hour: int.tryParse(parts[0]) ?? 0,
+          minute: int.tryParse(parts[1]) ?? 0,
+        );
+      }
+    }
+    if (tx.category != null) _selectedCategory = tx.category!;
+    if (tx.subCategory != null) _selectedSubCategory = tx.subCategory!;
+    if (tx.accountName != null) _selectedAccount = tx.accountName!;
+
+    // Splitwise details
+    final sw = tx.splitwiseDetails;
+    if (sw != null && sw.isNotEmpty) {
+      _showSplitwise = true;
+      final first = sw.first;
+      if (first is Map) {
+        final groupId = first['groupId']?.toString();
+        _splitType = (first['splitType'] ?? 'Equal').toString();
+        // Group name will be resolved after form data loads
+        if (groupId != null) {
+          _pendingSplitwiseGroupId = groupId;
+        }
+      }
+      _pendingSplitwiseMemberIds = sw
+          .where((e) => e is Map && e['userId'] != null)
+          .map((e) => e['userId'].toString())
+          .toList();
+    }
+  }
+
+  String? _pendingSplitwiseGroupId;
+  List<String> _pendingSplitwiseMemberIds = [];
 
   void _applyFormData({
     required List<Category> cats,
@@ -73,6 +134,22 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       if (groups.isNotEmpty && _selectedGroup.isEmpty) {
         _selectedGroup = groups.first.name;
       }
+
+      // Resolve pending splitwise prefill
+      if (_pendingSplitwiseGroupId != null && groups.isNotEmpty) {
+        final g = groups.where((g) => g.id == _pendingSplitwiseGroupId).firstOrNull;
+        if (g != null) {
+          _selectedGroup = g.name;
+          _selectedPeople.clear();
+          for (final mid in _pendingSplitwiseMemberIds) {
+            final m = g.members.where((m) => m.id == mid).firstOrNull;
+            if (m != null) _selectedPeople.add(m.name);
+          }
+        }
+        _pendingSplitwiseGroupId = null;
+        _pendingSplitwiseMemberIds = [];
+      }
+
       _loading = false;
     });
   }
@@ -209,6 +286,66 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             )
           : SubCategory(id: '', name: _selectedSubCategory);
 
+      // ── Edit mode: call update APIs ──
+      if (widget.isEdit && widget.prefill != null) {
+        final body = <String, dynamic>{
+          'id': widget.prefill!.id,
+          'amount': amount,
+          'date': dateStr,
+          'description': _descController.text,
+          'categoryId': catObj.id,
+          'subCategoryId': subCatObj.id,
+        };
+
+        // Resolve account
+        final isCreditCard = _creditCards.any((c) => c.name == _selectedAccount);
+        if (isCreditCard) {
+          final card = _creditCards.firstWhere((c) => c.name == _selectedAccount);
+          body['account'] = {'type': 'Credit Card', 'id': card.id};
+          body['accountId'] = card.id;
+        } else {
+          final bank = _bankAccounts.firstWhere(
+            (b) => b.name == _selectedAccount,
+            orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
+          );
+          body['account'] = {'type': 'Bank', 'id': bank.id};
+          body['accountId'] = bank.id;
+        }
+
+        // Splitwise for expense edit
+        if (_selectedType == 1 && _showSplitwise && _splitwiseGroups.isNotEmpty) {
+          body['includeSplitwise'] = true;
+          final group = _splitwiseGroups.firstWhere(
+            (g) => g.name == _selectedGroup,
+            orElse: () => _splitwiseGroups.first,
+          );
+          body['splitwiseGroupId'] = group.id;
+          body['splitwiseUserIds'] = _selectedPeople
+              .map((name) => group.members
+                  .firstWhere((m) => m.name == name, orElse: () => group.members.first)
+                  .id)
+              .toList();
+          body['splitType'] = _splitType.toLowerCase();
+        }
+
+        switch (_selectedType) {
+          case 0:
+            await _api.updateIncome(body);
+            break;
+          case 1:
+            await _api.updateExpense(body);
+            break;
+          case 3:
+            body['investmentAccountId'] = widget.prefill!.investmentAccountId;
+            await _api.updateInvestment(body);
+            break;
+        }
+
+        if (mounted) Navigator.pop(context, true);
+        return;
+      }
+
+      // ── Create mode (existing logic) ──
       switch (_selectedType) {
         case 0: // Income
           final bank = _bankAccounts.firstWhere(
