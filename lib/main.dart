@@ -1,8 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'screens/home_screen.dart';
+import 'services/api_service.dart';
+import 'services/notification_service.dart';
 
-void main() {
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  await NotificationService.instance.initialize();
+
+  // Auto-login with default credentials
+  final api = ApiService();
+  await api.loadCookie();
+
+  bool isLoggedIn = false;
+  try {
+    final session = await api.checkSession();
+    isLoggedIn = session['isLoggedIn'] == true;
+  } catch (_) {}
+
+  if (!isLoggedIn) {
+    try {
+      await api.login('Ajay', '1q2w3e4r5t-');
+    } catch (_) {}
+  }
+
   runApp(const FinanceApp());
 }
 
@@ -12,6 +37,7 @@ class FinanceApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: 'Finance App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(

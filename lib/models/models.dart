@@ -145,11 +145,21 @@ class TransactionModel {
     this.splitType,
   });
 
-  factory TransactionModel.fromJson(Map<String, dynamic> json) =>
-      TransactionModel(
+  factory TransactionModel.fromJson(Map<String, dynamic> json) {
+    String date = json['date'] ?? '';
+    String? time = json['time'];
+
+    // If date contains time (e.g. "2026-05-27 14:05"), split them
+    if (time == null && date.contains(' ')) {
+      final parts = date.split(' ');
+      date = parts[0];
+      time = parts.sublist(1).join(' ');
+    }
+
+    return TransactionModel(
         id: json['id'].toString(),
-        date: json['date'] ?? '',
-        time: json['time'],
+        date: date,
+        time: time,
         description: json['description'] ?? '',
         amount: _toDouble(json['amount']),
         type: json['type'] ?? '',
@@ -167,6 +177,7 @@ class TransactionModel {
         includeSplitwise: json['includeSplitwise'] == true,
         splitType: json['splitType']?.toString(),
       );
+  }
 }
 
 // ─── Category ────────────────────────────────────────────────

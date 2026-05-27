@@ -6,7 +6,8 @@ import '../services/app_data_cache.dart';
 class AddTransactionScreen extends StatefulWidget {
   final TransactionModel? prefill;
   final bool isEdit;
-  const AddTransactionScreen({super.key, this.prefill, this.isEdit = false});
+  final bool fromNotification;
+  const AddTransactionScreen({super.key, this.prefill, this.isEdit = false, this.fromNotification = false});
 
   @override
   State<AddTransactionScreen> createState() => _AddTransactionScreenState();
@@ -692,6 +693,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 icon: Icons.currency_rupee_outlined,
                 keyboardType: TextInputType.number,
                 prefix: '₹ ',
+                readOnly: widget.fromNotification,
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return 'Enter amount';
                   final parsed = double.tryParse(v.trim());
@@ -712,7 +714,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 icon: _isCreditCard
                     ? Icons.credit_card
                     : Icons.account_balance_outlined,
-                onTap: () => _showAccountPicker(),
+                onTap: widget.fromNotification ? null : () => _showAccountPicker(),
                 errorText: _accountError,
               ),
               const SizedBox(height: 16),
@@ -941,6 +943,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     String? prefix,
     String? Function(String?)? validator,
     int maxLines = 1,
+    bool readOnly = false,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -959,6 +962,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           keyboardType: keyboardType,
           validator: validator,
           maxLines: maxLines,
+          readOnly: readOnly,
+          style: readOnly
+              ? TextStyle(color: Colors.grey.shade500)
+              : null,
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: TextStyle(color: Colors.grey.shade400),
@@ -970,7 +977,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               color: Color(0xFF1E293B),
             ),
             filled: true,
-            fillColor: Colors.white,
+            fillColor: readOnly ? Colors.grey.shade100 : Colors.white,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             border: OutlineInputBorder(
@@ -997,6 +1004,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   // ── Date & Time Field ──
   Widget _buildDateTimeField() {
+    final locked = widget.fromNotification;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1010,7 +1018,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         ),
         const SizedBox(height: 8),
         GestureDetector(
-          onTap: () async {
+          onTap: locked
+              ? null
+              : () async {
             final pickedDate = await showDatePicker(
               context: context,
               initialDate: _selectedDate,
@@ -1032,7 +1042,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: locked ? Colors.grey.shade100 : Colors.white,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: Colors.grey.shade200),
             ),
@@ -1043,10 +1053,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 const SizedBox(width: 12),
                 Text(
                   '$_formattedDate, $_formattedTime',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w500,
-                    color: Color(0xFF1E293B),
+                    color: locked ? Colors.grey.shade500 : const Color(0xFF1E293B),
                   ),
                 ),
                 const Spacer(),
@@ -1065,10 +1075,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     required String label,
     required String value,
     required IconData icon,
-    required VoidCallback onTap,
+    required VoidCallback? onTap,
     String? errorText,
   }) {
     final hasError = errorText != null && errorText.isNotEmpty;
+    final locked = onTap == null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1086,7 +1097,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: locked ? Colors.grey.shade100 : Colors.white,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: hasError ? const Color(0xFFEF4444) : Colors.grey.shade200,
@@ -1105,7 +1116,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                       fontWeight: FontWeight.w500,
                       color: value.isEmpty
                           ? Colors.grey.shade400
-                          : const Color(0xFF1E293B),
+                          : locked
+                              ? Colors.grey.shade500
+                              : const Color(0xFF1E293B),
                     ),
                   ),
                 ),

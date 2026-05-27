@@ -14,9 +14,72 @@ class ApiService {
   final http.Client _client = http.Client();
   final LocalStorageService _localStorage = LocalStorageService();
 
-  Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-      };
+  String? _sessionCookie;
+
+  Map<String, String> get _headers {
+    final h = <String, String>{'Content-Type': 'application/json'};
+    if (_sessionCookie != null) h['Cookie'] = _sessionCookie!;
+    return h;
+  }
+
+  Future<void> loadCookie() async {
+    _sessionCookie = await _localStorage.getSessionCookie();
+  }
+
+  void setCookie(String cookie) {
+    _sessionCookie = cookie;
+  }
+
+  void clearCookie() {
+    _sessionCookie = null;
+  }
+
+  // ─── Auth ────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> login(String username, String password) async {
+    final uri = Uri.parse('$baseUrl/login');
+    final response = await _client.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'username': username, 'password': password}),
+    );
+    debugPrint('[API POST] /login → ${response.statusCode}');
+    if (response.statusCode == 200) {
+      // Extract session cookie from Set-Cookie header
+      final setCookie = response.headers['set-cookie'];
+      if (setCookie != null) {
+        // Parse the cookie name=value (ignore attributes)
+        final cookieValue = setCookie.split(';').first;
+        _sessionCookie = cookieValue;
+        await _localStorage.saveSessionCookie(cookieValue);
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (data['username'] != null) {
+        await _localStorage.saveUsername(data['username'] as String);
+      }
+      return data;
+    }
+    throw ApiException(response.statusCode, response.body);
+  }
+
+  Future<Map<String, dynamic>> checkSession() async {
+    final uri = Uri.parse('$baseUrl/logout');
+    final response = await _client.get(uri, headers: _headers);
+    debugPrint('[API GET] /logout (session check) → ${response.statusCode}');
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw ApiException(response.statusCode, response.body);
+  }
+
+  Future<void> logout() async {
+    final uri = Uri.parse('$baseUrl/logout');
+    try {
+      await _client.post(uri, headers: _headers);
+    } catch (_) {}
+    _sessionCookie = null;
+    await _localStorage.clearSession();
+  }
 
   // ─── Generic Helpers ───────────────────────────────────────
 
@@ -228,6 +291,9 @@ class ApiService {
 
   Future<Map<String, dynamic>> deleteTransaction(String id) =>
       _delete('/all-transactions', {'id': id});
+
+  Future<Map<String, dynamic>> getTransactionById(String id) =>
+      _get('/all-transactions', {'id': id});
 
   // ─── 7. Bank Details ──────────────────────────────────────
 

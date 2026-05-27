@@ -12,6 +12,8 @@ class LocalStorageService {
   static const String _keyCreditCardCaps = 'cached_credit_card_caps';
   static const String _keySplitwiseGroups = 'cached_splitwise_groups';
   static const String _keyInvestmentAccounts = 'cached_investment_accounts';
+  static const String _keySessionCookie = 'session_cookie';
+  static const String _keyUsername = 'session_username';
 
   SharedPreferences? _prefs;
 
@@ -87,5 +89,38 @@ class LocalStorageService {
     final raw = prefs.getString(_keyInvestmentAccounts);
     if (raw == null) return null;
     return jsonDecode(raw) as List<dynamic>;
+  }
+
+  // ─── Session / Auth ────────────────────────────────────────
+
+  Future<void> saveSessionCookie(String cookie) async {
+    final prefs = await _preferences;
+    await prefs.setString(_keySessionCookie, cookie);
+  }
+
+  Future<String?> getSessionCookie() async {
+    final prefs = await _preferences;
+    return prefs.getString(_keySessionCookie);
+  }
+
+  Future<void> saveUsername(String username) async {
+    final prefs = await _preferences;
+    await prefs.setString(_keyUsername, username);
+  }
+
+  Future<String?> getUsername() async {
+    final prefs = await _preferences;
+    return prefs.getString(_keyUsername);
+  }
+
+  Future<void> clearSession() async {
+    final prefs = await _preferences;
+    await prefs.remove(_keySessionCookie);
+    await prefs.remove(_keyUsername);
+  }
+
+  Future<void> clearAll() async {
+    final prefs = await _preferences;
+    await prefs.clear();
   }
 }
