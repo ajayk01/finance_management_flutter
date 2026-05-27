@@ -666,6 +666,7 @@ class _SettleUpDialog extends StatefulWidget {
 class _SettleUpDialogState extends State<_SettleUpDialog> {
   final _api = ApiService();
   final _cache = AppDataCache();
+  final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController();
   bool _loadingAccounts = true;
   bool _submitting = false;
@@ -704,11 +705,19 @@ class _SettleUpDialogState extends State<_SettleUpDialog> {
   }
 
   Future<void> _settle() async {
-    final amount = double.tryParse(_amountController.text);
-    if (amount == null || amount <= 0 || _selectedAccountId == null) return;
+    if (!_formKey.currentState!.validate()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please fill in all required fields'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
 
     setState(() => _submitting = true);
     try {
+      final amount = double.parse(_amountController.text.trim());
       await _api.settleUp(
         friendId: widget.friendId,
         bankAccountId: _selectedAccountId!,
@@ -741,35 +750,45 @@ class _SettleUpDialogState extends State<_SettleUpDialog> {
               height: 80,
               child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
             )
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: _selectedAccountId,
-                  decoration: const InputDecoration(
-                    labelText: 'Bank Account',
-                    border: OutlineInputBorder(),
+          : Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: _selectedAccountId,
+                    decoration: const InputDecoration(
+                      labelText: 'Bank Account',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (v) => v == null ? 'Select a bank account' : null,
+                    items: _bankAccounts
+                        .map((a) => DropdownMenuItem(
+                              value: a.id,
+                              child: Text(a.name),
+                            ))
+                        .toList(),
+                    onChanged: (v) => setState(() => _selectedAccountId = v),
                   ),
-                  items: _bankAccounts
-                      .map((a) => DropdownMenuItem(
-                            value: a.id,
-                            child: Text(a.name),
-                          ))
-                      .toList(),
-                  onChanged: (v) => setState(() => _selectedAccountId = v),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _amountController,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Amount',
-                    prefixText: '₹ ',
-                    border: OutlineInputBorder(),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _amountController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Amount',
+                      prefixText: '₹ ',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'Enter amount';
+                      final parsed = double.tryParse(v.trim());
+                      if (parsed == null || parsed <= 0) return 'Enter a valid amount';
+                      return null;
+                    },
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
       actions: [
         TextButton(

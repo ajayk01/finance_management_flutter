@@ -1,5 +1,13 @@
 import 'package:flutter/material.dart';
+import 'add_account_screen.dart';
+import 'add_category_screen.dart';
+import 'add_credit_cap_screen.dart';
+import 'add_subcategory_screen.dart';
+import 'add_transfer_screen.dart';
+import 'analytics_screen.dart';
+import 'pay_cc_bill_screen.dart';
 import 'splitwise_screen.dart';
+import 'unaudited_expense_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -14,43 +22,17 @@ class ProfileScreen extends StatelessWidget {
           children: [
             _buildTopBar(context),
             const SizedBox(height: 24),
-            _buildSectionHeader('Accounts & Transfers'),
+            _buildSectionHeader('Reports'),
             const SizedBox(height: 8),
             _buildOptionTile(
-              icon: Icons.account_balance_wallet_outlined,
-              title: 'Add Account',
-              onTap: () {},
-            ),
-            _buildOptionTile(
-              icon: Icons.swap_horiz_rounded,
-              title: 'Add Transfer',
-              onTap: () {},
-            ),
-            const SizedBox(height: 20),
-            _buildSectionHeader('Categories'),
-            const SizedBox(height: 8),
-            _buildOptionTile(
-              icon: Icons.category_outlined,
-              title: 'Add Category',
-              onTap: () {},
-            ),
-            _buildOptionTile(
-              icon: Icons.subdirectory_arrow_right_rounded,
-              title: 'Add Sub Category',
-              onTap: () {},
-            ),
-            const SizedBox(height: 20),
-            _buildSectionHeader('Credit & Bills'),
-            const SizedBox(height: 8),
-            _buildOptionTile(
-              icon: Icons.credit_score_outlined,
-              title: 'Add Credit Cap',
-              onTap: () {},
-            ),
-            _buildOptionTile(
-              icon: Icons.payment_rounded,
-              title: 'Pay CC Bill',
-              onTap: () {},
+              icon: Icons.insert_chart_outlined_rounded,
+              title: 'Analytics',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
+                );
+              },
             ),
             const SizedBox(height: 20),
             _buildSectionHeader('Tracking'),
@@ -68,7 +50,57 @@ class ProfileScreen extends StatelessWidget {
             _buildOptionTile(
               icon: Icons.pending_actions_outlined,
               title: 'Unaudited Expense',
-              onTap: () {},
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const UnauditedExpenseScreen()),
+                );
+              },
+            ),
+            const SizedBox(height: 20),
+            _buildSectionHeader('Accounts & Transfers'),
+            const SizedBox(height: 8),
+            _buildOptionTile(
+              icon: Icons.account_balance_wallet_outlined,
+              title: 'Add Account',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AddAccountScreen()),
+                );
+              },
+            ),
+            _buildOptionTile(
+              icon: Icons.swap_horiz_rounded,
+              title: 'Add Transfer',
+              onTap: () => AddTransferSheet.show(context),
+            ),
+            const SizedBox(height: 20),
+            _buildSectionHeader('Categories'),
+            const SizedBox(height: 8),
+            _buildOptionTile(
+              icon: Icons.category_outlined,
+              title: 'Add Category',
+              onTap: () => AddCategorySheet.show(context),
+            ),
+            _buildOptionTile(
+              icon: Icons.subdirectory_arrow_right_rounded,
+              title: 'Add Sub Category',
+              onTap: () => AddSubCategorySheet.show(context),
+            ),
+            const SizedBox(height: 20),
+            _buildSectionHeader('Credit & Bills'),
+            const SizedBox(height: 8),
+            _buildOptionTile(
+              icon: Icons.credit_score_outlined,
+              title: 'Add Credit Cap',
+              onTap: () => AddCreditCapSheet.show(context),
+            ),
+            _buildOptionTile(
+              icon: Icons.payment_rounded,
+              title: 'Pay CC Bill',
+              onTap: () => PayCcBillSheet.show(context),
             ),
           ],
         ),

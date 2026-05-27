@@ -24,6 +24,11 @@ class AppDataCache {
   bool _capsLoaded = false;
   bool _groupsLoaded = false;
 
+  // ─── Transaction cache (keyed by "month-year") ────────────
+  final Map<String, List<TransactionModel>> _transactionsCache = {};
+  final Map<String, Map<String, double>> _expenseByCategoryCache = {};
+  final Map<String, Map<String, double>> _incomeByCategoryCache = {};
+
   // ─── Getters ──────────────────────────────────────────────
 
   List<BankAccount> get bankAccounts => _bankAccounts;
@@ -41,6 +46,47 @@ class AppDataCache {
   List<Category> get categories => _categories;
   List<CreditCardCap> get creditCardCaps => _creditCardCaps;
   List<SplitwiseGroup> get splitwiseGroups => _splitwiseGroups;
+
+  // ─── Transaction cache getters/setters ────────────────────
+
+  String _txKey(String month, String year) => '$month-$year';
+
+  bool hasTransactionCache(String month, String year) =>
+      _transactionsCache.containsKey(_txKey(month, year));
+
+  List<TransactionModel>? getCachedTransactions(String month, String year) =>
+      _transactionsCache[_txKey(month, year)];
+
+  Map<String, double>? getCachedExpenseByCategory(String month, String year) =>
+      _expenseByCategoryCache[_txKey(month, year)];
+
+  Map<String, double>? getCachedIncomeByCategory(String month, String year) =>
+      _incomeByCategoryCache[_txKey(month, year)];
+
+  void updateTransactionCache({
+    required String month,
+    required String year,
+    required List<TransactionModel> transactions,
+    required Map<String, double> expenseByCategory,
+    required Map<String, double> incomeByCategory,
+  }) {
+    final key = _txKey(month, year);
+    _transactionsCache[key] = transactions;
+    _expenseByCategoryCache[key] = expenseByCategory;
+    _incomeByCategoryCache[key] = incomeByCategory;
+  }
+
+  void removeTransaction(String month, String year, String txId) {
+    final key = _txKey(month, year);
+    _transactionsCache[key]?.removeWhere((t) => t.id == txId);
+  }
+
+  void invalidateTransactionCache(String month, String year) {
+    final key = _txKey(month, year);
+    _transactionsCache.remove(key);
+    _expenseByCategoryCache.remove(key);
+    _incomeByCategoryCache.remove(key);
+  }
 
   // ─── Load from cache (SharedPreferences) ──────────────────
 
@@ -221,5 +267,8 @@ class AppDataCache {
     _categoriesLoaded = false;
     _capsLoaded = false;
     _groupsLoaded = false;
+    _transactionsCache.clear();
+    _expenseByCategoryCache.clear();
+    _incomeByCategoryCache.clear();
   }
 }

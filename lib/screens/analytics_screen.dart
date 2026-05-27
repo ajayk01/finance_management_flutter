@@ -34,6 +34,19 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   double _totalAmount = 0;
   double _changePercent = 0;
 
+  // ─── Local API response cache ─────────────────────────────
+  final Map<String, Map<String, dynamic>> _yearlyCache = {};       // key: year
+  final Map<String, Map<String, dynamic>> _monthDetailCache = {};  // key: "tab-month-year"
+  Map<String, dynamic>? _categoriesCache;
+
+  void _clearCache() {
+    _yearlyCache.clear();
+    _monthDetailCache.clear();
+    _categoriesCache = null;
+  }
+
+  String _detailCacheKey(int tab, String month, String year) => '$tab-$month-$year';
+
   @override
   void initState() {
     super.initState();
@@ -47,24 +60,37 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     return 0;
   }
 
-  Future<void> _loadData() async {
+  /// Common helper to extract the amount from a transaction map.
+  /// Uses the same field priority as HomeScreen & ExpensePieChart ('expense' first).
+  double _txnAmount(Map<String, dynamic> t) =>
+      _parseAmount(t['expense'] ?? t['amount']);
+
+  Future<void> _loadData({bool forceRefresh = false}) async {
+    if (forceRefresh) _clearCache();
     setState(() => _loading = true);
     final now = DateTime.now();
     final month = DateFormat('MMM').format(now).toLowerCase();
     final year = now.year.toString();
 
     try {
-      final results = await Future.wait([
-        _api.getYearlySummary(year),
-        _mainTab == 0
-            ? _api.getMonthlyIncome(month: month, year: year)
-            : _mainTab == 1
-                ? _api.getMonthlyExpenses(month: month, year: year)
-                : _api.getCategories(type: 'expense'),
-      ]);
+      // Fetch yearly summary (cached per year)
+      final yearlyData = _yearlyCache[year] ?? await _api.getYearlySummary(year);
+      _yearlyCache[year] = yearlyData;
 
-      final yearlyData = results[0];
-      final detailData = results[1];
+      // Fetch detail data (cached per tab+month+year)
+      final detailKey = _detailCacheKey(_mainTab, month, year);
+      Map<String, dynamic> detailData;
+      if (_monthDetailCache.containsKey(detailKey)) {
+        detailData = _monthDetailCache[detailKey]!;
+      } else if (_mainTab == 0) {
+        detailData = await _api.getMonthlyIncome(month: month, year: year);
+      } else if (_mainTab == 1) {
+        detailData = await _api.getMonthlyExpenses(month: month, year: year);
+      } else {
+        detailData = _categoriesCache ?? await _api.getCategories(type: 'expense');
+        _categoriesCache = detailData;
+      }
+      _monthDetailCache[detailKey] = detailData;
 
       // Parse yearly summary for bar chart
       final summary = yearlyData['summaryData'] as List? ?? [];
@@ -89,20 +115,30 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           (m) => m.toLowerCase() == currentMonthAbbr.toLowerCase());
       if (highlightIdx < 0 && months.isNotEmpty) highlightIdx = months.length - 1;
 
-      // Parse transactions – use same source as ExpensePieChart for consistency
+      // Parse transactions – prefer rawTransactions for full details (description, accountName)
       List<Map<String, dynamic>> txns = [];
       if (_mainTab == 0) {
-        txns = (detailData['monthlyIncome'] as List?
-                ?? detailData['rawTransactions'] as List?
+        txns = (detailData['rawTransactions'] as List?
+                ?? detailData['monthlyIncome'] as List?
                 ?? [])
             .map((e) => e as Map<String, dynamic>)
             .toList();
+        if (txns.isEmpty) {
+          txns = (detailData['monthlyIncome'] as List? ?? [])
+              .map((e) => e as Map<String, dynamic>)
+              .toList();
+        }
       } else if (_mainTab == 1) {
-        txns = (detailData['monthlyExpenses'] as List?
-                ?? detailData['rawTransactions'] as List?
+        txns = (detailData['rawTransactions'] as List?
+                ?? detailData['monthlyExpenses'] as List?
                 ?? [])
             .map((e) => e as Map<String, dynamic>)
             .toList();
+        if (txns.isEmpty) {
+          txns = (detailData['monthlyExpenses'] as List? ?? [])
+              .map((e) => e as Map<String, dynamic>)
+              .toList();
+        }
       }
 
       // Extract unique categories
@@ -120,10 +156,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         if (prev > 0) change = ((curr - prev) / prev) * 100;
       }
 
-      // Current month total from transactions – use 'expense' key first (same as ExpensePieChart & HomeScreen)
+      // Current month total from transactions – use common helper
       double currentMonthTotal = 0;
       for (final t in txns) {
-        currentMonthTotal += _parseAmount(t['expense'] ?? t['amount']);
+        currentMonthTotal += _txnAmount(t);
       }
 
       if (mounted) {
@@ -172,23 +208,40 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final year = DateTime.now().year.toString();
 
     try {
-      final detailData = _mainTab == 0
-          ? await _api.getMonthlyIncome(month: month, year: year)
-          : await _api.getMonthlyExpenses(month: month, year: year);
+      final detailKey = _detailCacheKey(_mainTab, month, year);
+      Map<String, dynamic> detailData;
+      if (_monthDetailCache.containsKey(detailKey)) {
+        detailData = _monthDetailCache[detailKey]!;
+      } else if (_mainTab == 0) {
+        detailData = await _api.getMonthlyIncome(month: month, year: year);
+      } else {
+        detailData = await _api.getMonthlyExpenses(month: month, year: year);
+      }
+      _monthDetailCache[detailKey] = detailData;
 
       List<Map<String, dynamic>> txns = [];
       if (_mainTab == 0) {
-        txns = (detailData['monthlyIncome'] as List?
-                ?? detailData['rawTransactions'] as List?
+        txns = (detailData['rawTransactions'] as List?
+                ?? detailData['monthlyIncome'] as List?
                 ?? [])
             .map((e) => e as Map<String, dynamic>)
             .toList();
+        if (txns.isEmpty) {
+          txns = (detailData['monthlyIncome'] as List? ?? [])
+              .map((e) => e as Map<String, dynamic>)
+              .toList();
+        }
       } else {
-        txns = (detailData['monthlyExpenses'] as List?
-                ?? detailData['rawTransactions'] as List?
+        txns = (detailData['rawTransactions'] as List?
+                ?? detailData['monthlyExpenses'] as List?
                 ?? [])
             .map((e) => e as Map<String, dynamic>)
             .toList();
+        if (txns.isEmpty) {
+          txns = (detailData['monthlyExpenses'] as List? ?? [])
+              .map((e) => e as Map<String, dynamic>)
+              .toList();
+        }
       }
 
       final catSet = <String>{'All'};
@@ -199,7 +252,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
       double monthTotal = 0;
       for (final t in txns) {
-        monthTotal += _parseAmount(t['expense'] ?? t['amount']);
+        monthTotal += _txnAmount(t);
       }
 
       if (mounted) {
@@ -247,7 +300,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             _buildAppBar(),
             Expanded(
               child: RefreshIndicator(
-                onRefresh: _loadData,
+                onRefresh: () => _loadData(forceRefresh: true),
                 child: SingleChildScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -340,7 +393,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   // ─── Main Tabs (Income / Outcome / Budget) ─────────────────
 
   Widget _buildMainTabs() {
-    final labels = ['Income', 'Outcome', 'Budget'];
+    final labels = ['Income', 'Expense', 'Budget'];
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFFEEEEF0),
@@ -665,7 +718,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final catTotals = <String, double>{};
     for (final t in _transactions) {
       final cat = (t['category'] ?? t['subCategory'] ?? 'Other').toString();
-      final amt = _parseAmount(t['amount'] ?? t['expense']);
+      final amt = _txnAmount(t);
       catTotals[cat] = (catTotals[cat] ?? 0) + amt;
     }
     // Sort by amount descending
@@ -756,7 +809,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   Widget _buildSubCategoryHeader(
       String subCategory, List<Map<String, dynamic>> txns) {
     final total = txns.fold<double>(
-        0, (sum, t) => sum + _parseAmount(t['amount'] ?? t['expense']));
+        0, (sum, t) => sum + _txnAmount(t));
     final isIncome = _mainTab == 0;
 
     return Container(
@@ -779,7 +832,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           ),
           const Spacer(),
           Text(
-            '${isIncome ? '+' : '-'}${formatINR(total)}',
+            formatINR(total),
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -859,7 +912,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               ),
             ),
             Text(
-              '${isIncome ? '+' : '-'}${formatINR(total)}',
+              formatINR(total),
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
@@ -875,10 +928,11 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _buildTransactionTile(Map<String, dynamic> txn) {
-    final description = (txn['description'] ?? 'Transaction').toString();
+    final description = (txn['description'] ?? '').toString();
     final amount = _parseAmount(txn['amount'] ?? txn['expense']);
     final date = (txn['date'] ?? '').toString();
     final subCategory = (txn['subCategory'] ?? '').toString();
+    final accountName = (txn['accountName'] ?? '').toString();
     final isIncome = _mainTab == 0;
 
     // Generate avatar color from description
@@ -934,7 +988,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  formattedDate,
+                  [formattedDate, if (accountName.isNotEmpty) accountName].join(' • '),
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.grey.shade500,
@@ -949,7 +1003,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '${isIncome ? '+' : '-'}${formatINR(amount)}',
+                formatINR(amount),
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w700,

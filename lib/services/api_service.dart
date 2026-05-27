@@ -492,6 +492,22 @@ class ApiService {
           List<Map<String, dynamic>> updates) =>
       _put('/unaudited-expenses', {'updates': updates});
 
+  Future<Map<String, dynamic>> deleteUnauditedExpenses(
+      List<String> ids) async {
+    final uri = Uri.parse('$baseUrl/unaudited-expenses');
+    final request = http.Request('DELETE', uri)
+      ..headers.addAll(_headers)
+      ..body = jsonEncode({'ids': ids});
+    debugPrint('[API DELETE] $uri body: ${request.body}');
+    final streamed = await _client.send(request);
+    final response = await http.Response.fromStream(streamed);
+    debugPrint('[API DELETE] /unaudited-expenses → ${response.statusCode}');
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw ApiException(response.statusCode, response.body);
+  }
+
   // ─── 30. Unsettled Splitwise Expenses ─────────────────────
 
   Future<Map<String, dynamic>> getUnsettledSplitwiseExpenses(

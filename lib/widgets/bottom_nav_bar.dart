@@ -29,7 +29,7 @@ class BottomNavBar extends StatelessWidget {
             ),
             const SizedBox(width: 48), // space for FAB
             _buildNavItem(
-              Icons.insert_chart_outlined_rounded, Icons.insert_chart_rounded, 'Analytics', 2,
+              Icons.trending_up_outlined, Icons.trending_up_rounded, 'Investments', 2,
             ),
             _buildNavItem(
               Icons.more_horiz_rounded, Icons.more_horiz_rounded, 'More', 3,

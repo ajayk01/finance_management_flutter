@@ -16,11 +16,9 @@ class ExpensePieChart extends StatefulWidget {
 class _ExpensePieChartState extends State<ExpensePieChart> {
   late int _selectedYear;
   late int _selectedMonth;
-  final PageController _pageController = PageController();
   int _currentPage = 0;
   final _api = ApiService();
 
-  // ignore: unused_field
   bool _loading = true;
   int? _touchedIndex;
   double _budget = 0;
@@ -131,7 +129,6 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
 
   @override
   void dispose() {
-    _pageController.dispose();
     super.dispose();
   }
 
@@ -176,8 +173,10 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
           const SizedBox(height: 24),
           SizedBox(
             height: 300,
-            child: PageView(
-              controller: _pageController,
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : PageView(
+              controller: PageController(initialPage: _currentPage),
               onPageChanged: (index) => setState(() {
                 _currentPage = index;
                 _touchedIndex = null;
@@ -190,7 +189,10 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
             ),
           ),
           const SizedBox(height: 16),
-          _buildCategoryLegend(),
+          if (_loading)
+            const SizedBox.shrink()
+          else
+            _buildCategoryLegend(),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,

@@ -6,10 +6,9 @@ import '../services/app_data_cache.dart';
 import '../widgets/account_card.dart';
 import '../widgets/expense_pie_chart.dart';
 import '../widgets/monthly_budget.dart';
-import '../widgets/overview_bar_chart.dart';
 import '../widgets/money_flow.dart';
 import '../widgets/bottom_nav_bar.dart';
-import 'analytics_screen.dart';
+import 'investment_screen.dart';
 import 'profile_screen.dart';
 import 'transaction_screen.dart';
 import 'add_transaction_screen.dart';
@@ -192,7 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case 1:
         return const TransactionScreen();
       case 2:
-        return const AnalyticsScreen();
+        return const InvestmentScreen();
       case 3:
         return const ProfileScreen();
       default:
@@ -210,12 +209,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   _buildHeader(),
                   const SizedBox(height: 24),
-                  OverviewBarChart(
-                    income: _totalIncome,
-                    expense: _totalExpense,
-                    investment: _totalInvestment,
-                  ),
-                  const SizedBox(height: 28),
                   AccountCard(
                     bankAccounts: _bankAccounts,
                     creditCards: _creditCards,

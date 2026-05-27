@@ -118,6 +118,10 @@ class TransactionModel {
   final String? investmentAccountId;
   final String? investmentAccountName;
   final List<dynamic>? splitwiseDetails;
+  final String? splitwiseGroupId;
+  final List<dynamic>? splitwiseUserIds;
+  final bool includeSplitwise;
+  final String? splitType;
 
   TransactionModel({
     required this.id,
@@ -135,6 +139,10 @@ class TransactionModel {
     this.investmentAccountId,
     this.investmentAccountName,
     this.splitwiseDetails,
+    this.splitwiseGroupId,
+    this.splitwiseUserIds,
+    this.includeSplitwise = false,
+    this.splitType,
   });
 
   factory TransactionModel.fromJson(Map<String, dynamic> json) =>
@@ -153,7 +161,11 @@ class TransactionModel {
         subCategoryId: json['subCategoryId']?.toString(),
         investmentAccountId: json['investmentAccountId']?.toString(),
         investmentAccountName: json['investmentAccountName'],
-        splitwiseDetails: json['splitwiseDetails'],
+        splitwiseDetails: json['splitwiseDetails'] is List ? json['splitwiseDetails'] : null,
+        splitwiseGroupId: json['splitwiseGroupId']?.toString(),
+        splitwiseUserIds: json['splitwiseUserIds'] is List ? json['splitwiseUserIds'] : null,
+        includeSplitwise: json['includeSplitwise'] == true,
+        splitType: json['splitType']?.toString(),
       );
 }
 

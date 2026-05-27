@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/app_data_cache.dart';
 import '../utils/currency_formatter.dart';
+import '../widgets/overview_bar_chart.dart';
 import 'add_transaction_screen.dart';
 
 // ─── Data Models ─────────────────────────────────────────────
@@ -89,11 +90,15 @@ class _TransactionScreenState extends State<TransactionScreen> {
   final _api = ApiService();
 
   bool _loading = true;
+  bool _deleting = false;
   List<TransactionModel> _transactions = [];
   List<BankAccount> _bankAccounts = [];
   List<CreditCardAccount> _creditCardAccounts = [];
   Map<String, double> _apiExpenseByCategory = {};
   Map<String, double> _apiIncomeByCategory = {};
+  double _totalIncome = 0;
+  double _totalExpense = 0;
+  double _totalInvestment = 0;
 
   @override
   void initState() {
@@ -106,28 +111,47 @@ class _TransactionScreenState extends State<TransactionScreen> {
   }
 
   Future<void> _loadTransactions() async {
+    final month = DateFormat('MMM').format(_currentDate).toLowerCase();
+    final year = _currentDate.year.toString();
+    final cache = AppDataCache();
+
+    // Show cached data immediately if available
+    if (cache.hasTransactionCache(month, year)) {
+      final cachedTx = cache.getCachedTransactions(month, year)!;
+      final cachedExp = cache.getCachedExpenseByCategory(month, year) ?? {};
+      final cachedInc = cache.getCachedIncomeByCategory(month, year) ?? {};
+      setState(() {
+        _transactions = cachedTx;
+        _bankAccounts = cache.bankAccounts;
+        _creditCardAccounts = cache.creditCardAccounts;
+        _apiExpenseByCategory = cachedExp;
+        _apiIncomeByCategory = cachedInc;
+        _loading = false;
+      });
+      return;
+    }
+
     setState(() => _loading = true);
     try {
-      final month = DateFormat('MMM').format(_currentDate).toLowerCase();
-      final year = _currentDate.year.toString();
       final results = await Future.wait([
         _api.getAllTransactions(month: month, year: year),
         _api.getAccounts(),
         _api.getMonthlyExpenses(month: month, year: year),
         _api.getMonthlyIncome(month: month, year: year),
+        _api.getMonthlyInvestments(month: month, year: year),
       ]);
 
       final txData = results[0];
       final accountsData = results[1];
       final expData = results[2];
       final incData = results[3];
+      final invData = results[4];
 
       final txList = (txData['transactions'] as List? ?? [])
           .map((j) => TransactionModel.fromJson(j))
           .toList();
 
       // Update cache with fresh accounts
-      final cache = AppDataCache();
       if (accountsData.isNotEmpty) cache.updateAccounts(accountsData);
       final banks = cache.bankAccounts;
       final cards = cache.creditCardAccounts;
@@ -148,6 +172,29 @@ class _TransactionScreenState extends State<TransactionScreen> {
         incByCat[cat] = (incByCat[cat] ?? 0) + amt;
       }
 
+      // Compute totals for overview
+      double totalIncome = 0;
+      for (final item in (incData['monthlyIncome'] as List? ?? [])) {
+        totalIncome += _parseAmount(item['expense']?.toString() ?? '0');
+      }
+      double totalExpense = 0;
+      for (final item in (expData['monthlyExpenses'] as List? ?? [])) {
+        totalExpense += _parseAmount(item['expense']?.toString() ?? '0');
+      }
+      double totalInvestment = 0;
+      for (final item in (invData['monthlyInvestments'] as List? ?? [])) {
+        totalInvestment += _parseAmount(item['expense']?.toString() ?? '0');
+      }
+
+      // Store in cache
+      cache.updateTransactionCache(
+        month: month,
+        year: year,
+        transactions: txList,
+        expenseByCategory: expByCat,
+        incomeByCategory: incByCat,
+      );
+
       if (mounted) {
         setState(() {
           _transactions = txList;
@@ -155,6 +202,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
           _creditCardAccounts = cards;
           _apiExpenseByCategory = expByCat;
           _apiIncomeByCategory = incByCat;
+          _totalIncome = totalIncome;
+          _totalExpense = totalExpense;
+          _totalInvestment = totalInvestment;
           _loading = false;
         });
       }
@@ -265,25 +315,30 @@ class _TransactionScreenState extends State<TransactionScreen> {
       final isExpense =
           tx.type.toLowerCase() == 'expense';
       final isIncome = tx.type.toLowerCase() == 'income';
+      final isTransfer = tx.type.toLowerCase() == 'transfer';
       dayMap[dateStr]!.add(Transaction(
         title: tx.description,
         subtitle: [
           tx.category ?? tx.type,
           if (tx.subCategory != null && tx.subCategory!.isNotEmpty) tx.subCategory!,
         ].join(' • '),
-        amount: isExpense ? -tx.amount.abs() : tx.amount.abs(),
+        amount: tx.amount,
         type: _mapType(tx.type),
         icon: _iconForCategory(tx.category),
         iconColor: isExpense
             ? Colors.white
             : isIncome
                 ? const Color(0xFF6B7280)
-                : const Color(0xFF00695C),
+                : isTransfer
+                    ? const Color(0xFF1E40AF)
+                    : const Color(0xFF00695C),
         iconBg: isExpense
             ? const Color(0xFFFEECEC)
             : isIncome
                 ? const Color(0xFFE5E7EB)
-                : const Color(0xFFE0F2F1),
+                : isTransfer
+                    ? const Color(0xFFDBEAFE)
+                    : const Color(0xFFE0F2F1),
         account: tx.accountName ?? '',
         model: tx,
       ));
@@ -366,7 +421,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
     }
     final totalSpend = _categories.fold<double>(0, (s, c) => s + c.amount);
 
-    return SafeArea(
+    return Stack(
+      children: [
+      SafeArea(
       child: Column(
         children: [
           // ── Header ──
@@ -387,6 +444,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
                       setState(() {
                         _currentDate = DateTime(picked.year, picked.month);
                       });
+                      _loadTransactions();
                     }
                   },
                   child: Container(
@@ -494,88 +552,124 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
           const SizedBox(height: 20),
 
-          // ── Total Spend + Segmented Bar ──
-          if (totalSpend > 0)
+          // ── Overview (only for All filter) ──
+          if (_selectedFilter == 'All') ...[            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: OverviewBarChart(
+                income: _totalIncome,
+                expense: _totalExpense,
+                investment: _totalInvestment,
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+
+          // ── Total Spend + Segmented Bar (Overview style) ──
+          if (totalSpend > 0 && _selectedFilter != 'All')
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      _selectedFilter == 'Income'
-                          ? 'Total Income'
-                          : _selectedFilter == 'Investment'
-                              ? 'Total Investment'
-                              : 'Total Spend',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                    Text(
-                      formatINR(totalSpend),
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF1E293B),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: 14,
-                  child: Row(
-                    children: _categories.asMap().entries.map((entry) {
-                      final i = entry.key;
-                      final c = entry.value;
-                      return Expanded(
-                        flex: (c.amount * 100 / totalSpend).round(),
-                        child: Container(
-                          margin: EdgeInsets.only(
-                            right: i < _categories.length - 1 ? 3 : 0,
-                          ),
-                          decoration: BoxDecoration(
-                            color: c.color,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _selectedFilter == 'Income'
+                            ? 'Total Income'
+                            : _selectedFilter == 'Investment'
+                                ? 'Total Investment'
+                                : 'Total Spend',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade900,
                         ),
-                      );
-                    }).toList(),
+                      ),
+                      Flexible(
+                        child: Wrap(
+                          spacing: 12,
+                          runSpacing: 6,
+                          alignment: WrapAlignment.end,
+                          children: _categories.map((c) {
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: c.color,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  c.name,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey.shade500,
+                                  ),
+                                ),
+                              ],
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 6,
-                  children: _categories.map((c) {
-                    return Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: c.color,
-                            shape: BoxShape.circle,
-                          ),
+                  const SizedBox(height: 20),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: SizedBox(
+                      height: 14,
+                      child: Row(
+                        children: _categories.asMap().entries.map((entry) {
+                          final i = entry.key;
+                          final c = entry.value;
+                          return Expanded(
+                            flex: (c.amount * 100 / totalSpend).round().clamp(1, 100),
+                            child: Container(
+                              margin: EdgeInsets.only(
+                                right: i < _categories.length - 1 ? 2 : 0,
+                              ),
+                              color: c.color,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Total: ${formatINR(totalSpend, decimals: 0)}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade700,
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          c.name,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade600,
-                          ),
+                      ),
+                      Text(
+                        _categories.map((c) => formatINR(c.amount, decimals: 0)).join(' · '),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade500,
                         ),
-                      ],
-                    );
-                  }).toList(),
-                ),
-              ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
 
@@ -583,14 +677,26 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
           // ── Transaction List ──
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: _filteredGroups.length,
-              itemBuilder: (context, i) => _buildDayGroupWidget(_filteredGroups[i]),
+            child: RefreshIndicator(
+              onRefresh: _refreshTransactions,
+              child: ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                itemCount: _filteredGroups.length,
+                itemBuilder: (context, i) =>
+                    _buildDayGroupWidget(_filteredGroups[i]),
+              ),
             ),
           ),
         ],
       ),
+    ),
+    if (_deleting)
+      Container(
+        color: Colors.black26,
+        child: const Center(child: CircularProgressIndicator()),
+      ),
+    ],
     );
   }
 
@@ -796,13 +902,28 @@ class _TransactionScreenState extends State<TransactionScreen> {
   }
 
   Widget _buildTransactionTile(Transaction t) {
-    final isExpense = t.amount < 0;
-    final amountStr = isExpense
-        ? '-${formatINR(t.amount.abs())}'
-        : '+${formatINR(t.amount)}';
-    final amountColor = isExpense
-        ? const Color(0xFFEF4444)
-        : const Color(0xFF22C55E);
+    String amountStr;
+    Color amountColor;
+    switch (t.type) {
+      case TransactionType.expense:
+        amountStr = t.amount < 0
+            ? '-${formatINR(t.amount.abs())}'
+            : formatINR(t.amount.abs());
+        amountColor = const Color(0xFFEF4444);
+        break;
+      case TransactionType.income:
+        amountStr = formatINR(t.amount.abs());
+        amountColor = const Color(0xFF22C55E);
+        break;
+      case TransactionType.transfer:
+        amountStr = formatINR(t.amount.abs());
+        amountColor = const Color(0xFF3B82F6);
+        break;
+      case TransactionType.investment:
+        amountStr = formatINR(t.amount.abs());
+        amountColor = const Color(0xFF6366F1);
+        break;
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -943,16 +1064,24 @@ class _TransactionScreenState extends State<TransactionScreen> {
       ),
     );
     if (confirm == true) {
+      setState(() => _deleting = true);
       try {
         await _api.deleteTransaction(tx.id);
-        _loadTransactions();
+        final month = DateFormat('MMM').format(_currentDate).toLowerCase();
+        final year = _currentDate.year.toString();
+        AppDataCache().removeTransaction(month, year, tx.id);
         if (mounted) {
+          setState(() {
+            _transactions.removeWhere((t) => t.id == tx.id);
+            _deleting = false;
+          });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Transaction deleted')),
           );
         }
       } catch (e) {
         if (mounted) {
+          setState(() => _deleting = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Delete failed: $e')),
           );
@@ -967,7 +1096,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
       MaterialPageRoute(
         builder: (_) => AddTransactionScreen(prefill: tx),
       ),
-    ).then((_) => _loadTransactions());
+    ).then((_) => _refreshTransactions());
   }
 
   void _showEditDialog(TransactionModel tx) {
@@ -976,6 +1105,13 @@ class _TransactionScreenState extends State<TransactionScreen> {
       MaterialPageRoute(
         builder: (_) => AddTransactionScreen(prefill: tx, isEdit: true),
       ),
-    ).then((_) => _loadTransactions());
+    ).then((_) => _refreshTransactions());
+  }
+
+  Future<void> _refreshTransactions() async {
+    final month = DateFormat('MMM').format(_currentDate).toLowerCase();
+    final year = _currentDate.year.toString();
+    AppDataCache().invalidateTransactionCache(month, year);
+    await _loadTransactions();
   }
 }
