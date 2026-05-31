@@ -14,6 +14,8 @@ class LocalStorageService {
   static const String _keyInvestmentAccounts = 'cached_investment_accounts';
   static const String _keySessionCookie = 'session_cookie';
   static const String _keyUsername = 'session_username';
+  static const String _keyZohoAccessToken = 'zoho_access_token';
+  static const String _keyZohoRefreshToken = 'zoho_refresh_token';
 
   SharedPreferences? _prefs;
 
@@ -122,5 +124,33 @@ class LocalStorageService {
   Future<void> clearAll() async {
     final prefs = await _preferences;
     await prefs.clear();
+  }
+
+  // ─── Zoho OAuth Tokens ─────────────────────────────────────
+
+  Future<void> saveZohoAccessToken(String token) async {
+    final prefs = await _preferences;
+    await prefs.setString(_keyZohoAccessToken, token);
+  }
+
+  Future<String?> getZohoAccessToken() async {
+    final prefs = await _preferences;
+    return prefs.getString(_keyZohoAccessToken);
+  }
+
+  Future<void> saveZohoRefreshToken(String token) async {
+    final prefs = await _preferences;
+    await prefs.setString(_keyZohoRefreshToken, token);
+  }
+
+  Future<String?> getZohoRefreshToken() async {
+    final prefs = await _preferences;
+    return prefs.getString(_keyZohoRefreshToken);
+  }
+
+  Future<void> clearZohoTokens() async {
+    final prefs = await _preferences;
+    await prefs.remove(_keyZohoAccessToken);
+    await prefs.remove(_keyZohoRefreshToken);
   }
 }

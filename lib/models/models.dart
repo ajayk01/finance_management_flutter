@@ -352,3 +352,22 @@ class FriendBalance {
         friendId: json['friendId'].toString(),
       );
 }
+
+// ─── CC Statement Transaction ────────────────────────────────
+class CCStatementTransaction {
+  final String date;
+  final String time;
+  final String description;
+  final double amount;
+  final bool isCredit;
+  final bool isEmi;
+
+  CCStatementTransaction({
+    required this.date,
+    required this.time,
+    required this.description,
+    required this.amount,
+    this.isCredit = false,
+    this.isEmi = false,
+  });
+}

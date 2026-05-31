@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../main.dart';
 import '../models/models.dart';
 import '../screens/add_transaction_screen.dart';
+import '../screens/cc_statement_screen.dart';
 import 'api_service.dart';
 
 @pragma('vm:entry-point')
@@ -179,18 +180,26 @@ class NotificationService {
     if (payload != null) {
       final data = jsonDecode(payload) as Map<String, dynamic>;
       debugPrint('Notification tapped with data: $data');
-      final tnxId = data['tnxId'] as String?;
-      if (tnxId != null) {
-        _navigateToTransaction(tnxId);
+      if (data['isCCStatment'] == 'true' || data['isCCStatment'] == true) {
+        _navigateToCCStatement(data);
+      } else {
+        final tnxId = data['tnxId'] as String?;
+        if (tnxId != null) {
+          _navigateToTransaction(tnxId);
+        }
       }
     }
   }
 
   void _handleNotificationTap(RemoteMessage message) {
     debugPrint('Notification opened app with data: ${message.data}');
-    final tnxId = message.data['tnxId'] as String?;
-    if (tnxId != null) {
-      _navigateToTransaction(tnxId);
+    if (message.data['isCCStatment'] == 'true' || message.data['isCCStatment'] == true) {
+      _navigateToCCStatement(message.data);
+    } else {
+      final tnxId = message.data['tnxId'] as String?;
+      if (tnxId != null) {
+        _navigateToTransaction(tnxId);
+      }
     }
   }
 
@@ -225,5 +234,29 @@ class NotificationService {
       nav.pop();
       debugPrint('[FCM] Failed to fetch transaction $tnxId: $e');
     }
+  }
+
+  void _navigateToCCStatement(Map<String, dynamic> data) {
+    final nav = navigatorKey.currentState;
+    if (nav == null) return;
+
+    final messageId = data['messageId'] as String?;
+    final userId = data['userId'] as String?;
+    final folderId = data['folderId'] as String?;
+
+    if (messageId == null || userId == null || folderId == null) {
+      debugPrint('[FCM] Missing CC statement params: messageId=$messageId, userId=$userId, folderId=$folderId');
+      return;
+    }
+
+    nav.push(
+      MaterialPageRoute(
+        builder: (_) => CCStatementScreen(
+          userId: userId,
+          folderId: folderId,
+          messageId: messageId,
+        ),
+      ),
+    );
   }
 }
