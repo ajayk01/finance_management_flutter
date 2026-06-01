@@ -7,7 +7,8 @@ class AddTransactionScreen extends StatefulWidget {
   final TransactionModel? prefill;
   final bool isEdit;
   final bool fromNotification;
-  const AddTransactionScreen({super.key, this.prefill, this.isEdit = false, this.fromNotification = false});
+  final Set<String> lockFields;
+  const AddTransactionScreen({super.key, this.prefill, this.isEdit = false, this.fromNotification = false, this.lockFields = const {}});
 
   @override
   State<AddTransactionScreen> createState() => _AddTransactionScreenState();
@@ -693,7 +694,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 icon: Icons.currency_rupee_outlined,
                 keyboardType: TextInputType.number,
                 prefix: '₹ ',
-                readOnly: widget.fromNotification,
+                readOnly: widget.fromNotification || widget.lockFields.contains('amount'),
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return 'Enter amount';
                   final parsed = double.tryParse(v.trim());
@@ -714,7 +715,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 icon: _isCreditCard
                     ? Icons.credit_card
                     : Icons.account_balance_outlined,
-                onTap: widget.fromNotification ? null : () => _showAccountPicker(),
+                onTap: (widget.fromNotification || widget.lockFields.contains('account')) ? null : () => _showAccountPicker(),
                 errorText: _accountError,
               ),
               const SizedBox(height: 16),

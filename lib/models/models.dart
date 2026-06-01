@@ -370,4 +370,78 @@ class CCStatementTransaction {
     this.isCredit = false,
     this.isEmi = false,
   });
+
+  /// Convert statement date (DD/MM/YYYY) to YYYY-MM-DD for matching
+  String get normalizedDate {
+    final parts = date.split('/');
+    if (parts.length == 3) return '${parts[2]}-${parts[1]}-${parts[0]}';
+    return date;
+  }
+}
+
+// ─── Merged CC Transaction ───────────────────────────────────
+/// Holds a statement transaction merged with DB transaction (if matched).
+class MergedCCTransaction {
+  final CCStatementTransaction statementTxn;
+  final TransactionModel? dbTxn; // null if not found in DB
+
+  MergedCCTransaction({
+    required this.statementTxn,
+    this.dbTxn,
+  });
+
+  bool get isMatched => dbTxn != null;
+  String get date => statementTxn.date;
+  String get description => dbTxn?.description ?? statementTxn.description;
+  String? get category => dbTxn?.category;
+  String? get subCategory => dbTxn?.subCategory;
+  double get statementAmount => statementTxn.amount;
+  double? get dbAmount => dbTxn?.amount;
+  bool get isCredit => statementTxn.isCredit;
+  bool get isEmi => statementTxn.isEmi;
+}
+
+// ─── Bank Statement Transaction ──────────────────────────────
+class BankStatementTransaction {
+  final String date;
+  final String description;
+  final double amount;
+  final bool isCredit; // true = credit, false = debit
+  final double? balance; // running balance
+
+  BankStatementTransaction({
+    required this.date,
+    required this.description,
+    required this.amount,
+    required this.isCredit,
+    this.balance,
+  });
+
+  /// Convert statement date (DD/MM/YYYY) to YYYY-MM-DD for matching
+  String get normalizedDate {
+    final parts = date.split('/');
+    if (parts.length == 3) return '${parts[2]}-${parts[1]}-${parts[0]}';
+    return date;
+  }
+}
+
+// ─── Merged Bank Transaction ─────────────────────────────────
+class MergedBankTransaction {
+  final BankStatementTransaction statementTxn;
+  final TransactionModel? dbTxn;
+
+  MergedBankTransaction({
+    required this.statementTxn,
+    this.dbTxn,
+  });
+
+  bool get isMatched => dbTxn != null;
+  String get date => statementTxn.date;
+  String get description => dbTxn?.description ?? statementTxn.description;
+  String? get category => dbTxn?.category;
+  String? get subCategory => dbTxn?.subCategory;
+  double get statementAmount => statementTxn.amount;
+  double? get dbAmount => dbTxn?.amount;
+  bool get isCredit => statementTxn.isCredit;
+  double? get balance => statementTxn.balance;
 }

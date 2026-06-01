@@ -2,21 +2,41 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import '../models/models.dart';
+import '../services/api_service.dart';
 import '../services/cc_statement_parser.dart';
 import '../services/zoho_mail_service.dart';
 import '../utils/currency_formatter.dart';
+import 'add_transaction_screen.dart';
 
 class CCStatementScreen extends StatefulWidget {
-  final String userId;
-  final String folderId;
-  final String messageId;
+  final String? userId;
+  final String? folderId;
+  final String? messageId;
+  final String? localPdfPath;
 
   const CCStatementScreen({
     super.key,
-    required this.userId,
-    required this.folderId,
-    required this.messageId,
+    this.userId,
+    this.folderId,
+    this.messageId,
+    this.localPdfPath,
   });
+
+  /// Constructor for Zoho mail fetched PDFs
+  const CCStatementScreen.fromMail({
+    super.key,
+    required String this.userId,
+    required String this.folderId,
+    required String this.messageId,
+  }) : localPdfPath = null;
+
+  /// Constructor for locally uploaded PDFs
+  const CCStatementScreen.fromFile({
+    super.key,
+    required String this.localPdfPath,
+  })  : userId = null,
+        folderId = null,
+        messageId = null;
 
   @override
   State<CCStatementScreen> createState() => _CCStatementScreenState();
@@ -36,11 +56,20 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
   bool _parsing = false;
   String? _parseError;
 
+  // Merged transactions
+  List<MergedCCTransaction>? _mergedTransactions;
+  bool _fetchingDb = false;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _fetchStatement();
+    if (widget.localPdfPath != null) {
+      _pdfPath = widget.localPdfPath;
+      _loading = false;
+    } else {
+      _fetchStatement();
+    }
   }
 
   @override
@@ -73,9 +102,9 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
 
       try {
         final path = await _zoho.fetchPdfAttachment(
-          userId: widget.userId,
-          folderId: widget.folderId,
-          messageId: widget.messageId,
+          userId: widget.userId!,
+          folderId: widget.folderId!,
+          messageId: widget.messageId!,
         );
         setState(() {
           _pdfPath = path;
@@ -97,9 +126,9 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
           }
           // Retry after re-authentication
           final path = await _zoho.fetchPdfAttachment(
-            userId: widget.userId,
-            folderId: widget.folderId,
-            messageId: widget.messageId,
+            userId: widget.userId!,
+            folderId: widget.folderId!,
+            messageId: widget.messageId!,
           );
           setState(() {
             _pdfPath = path;
@@ -188,6 +217,7 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
     setState(() {
       _parsing = true;
       _parseError = null;
+      _mergedTransactions = null;
     });
     try {
       final result = await CCStatementParser.parse(_pdfPath!, password: _pdfPassword);
@@ -196,9 +226,9 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
           _parsedResult = result;
           _parsing = false;
         });
-        // Auto-switch to transactions tab if transactions found
         if (result.transactions.isNotEmpty) {
           _tabController.animateTo(1);
+          _fetchAndMergeDbTransactions(result);
         }
       }
     } catch (e) {
@@ -207,6 +237,121 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
         setState(() {
           _parseError = e.toString();
           _parsing = false;
+        });
+      }
+    }
+  }
+
+  /// Fetch DB transactions for the billing period months, then match with statement.
+  Future<void> _fetchAndMergeDbTransactions(CCStatementResult result) async {
+    setState(() => _fetchingDb = true);
+    try {
+      final api = ApiService();
+      final startDate = result.effectiveStartDate;
+      final endDate = result.effectiveEndDate;
+
+      if (startDate == null || endDate == null) {
+        // Can't determine billing period; show statement-only data
+        setState(() {
+          _mergedTransactions = result.transactions
+              .map((t) => MergedCCTransaction(statementTxn: t))
+              .toList();
+          _fetchingDb = false;
+        });
+        return;
+      }
+
+      debugPrint('[CCStatement] Billing period: $startDate - $endDate');
+
+      // Collect all month/year combos in the billing range
+      final monthNames = [
+        '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ];
+      final months = <String>{};
+      var cursor = DateTime(startDate.year, startDate.month);
+      final endMonth = DateTime(endDate.year, endDate.month);
+      while (!cursor.isAfter(endMonth)) {
+        months.add('${monthNames[cursor.month]}-${cursor.year}');
+        cursor = DateTime(cursor.year, cursor.month + 1);
+      }
+
+      // Fetch all DB transactions for those months in parallel
+      final allDbTxns = <TransactionModel>[];
+      final futures = months.map((my) {
+        final parts = my.split('-');
+        return api.getAllTransactions(month: parts[0], year: parts[1]);
+      }).toList();
+
+      final results = await Future.wait(futures);
+      for (final data in results) {
+        final txList = (data['transactions'] as List? ?? [])
+            .map((j) => TransactionModel.fromJson(j))
+            .toList();
+        allDbTxns.addAll(txList);
+      }
+
+      debugPrint('[CCStatement] Fetched ${allDbTxns.length} DB transactions');
+
+      // Filter to only transactions from the matching CC account
+      final card = result.detectedCard;
+      final ccAccountId = card.accountId;
+      final ccDbTxns = ccAccountId.isNotEmpty
+          ? allDbTxns.where((t) => t.accountId == ccAccountId).toList()
+          : allDbTxns;
+      debugPrint('[CCStatement] Card: ${card.cardLabel} (accountId=$ccAccountId)');
+      debugPrint('[CCStatement] Filtered to ${ccDbTxns.length} CC account transactions');
+
+      // Debug: print sample DB dates to verify format
+      for (final dbTxn in ccDbTxns.take(5)) {
+        debugPrint('[CCStatement] DB txn: date="${dbTxn.date}" amount=${dbTxn.amount} desc="${dbTxn.description}"');
+      }
+      // Debug: print statement dates
+      for (final stmtTxn in result.transactions.take(5)) {
+        debugPrint('[CCStatement] Stmt txn: date="${stmtTxn.date}" normalized="${stmtTxn.normalizedDate}" amount=${stmtTxn.amount}');
+      }
+
+      // Build merged list: match by date + amount
+      final usedDbIds = <String>{};
+      final merged = <MergedCCTransaction>[];
+
+      for (final stmtTxn in result.transactions) {
+        final stmtDate = stmtTxn.normalizedDate; // YYYY-MM-DD
+
+        // Find matching DB transaction: same date + same amount
+        TransactionModel? match;
+        for (final dbTxn in ccDbTxns) {
+          if (usedDbIds.contains(dbTxn.id)) continue;
+          // Compare dates: normalize DB date too (strip time, handle different formats)
+          final dbDate = dbTxn.date.split(' ').first.split('T').first;
+          if (dbDate == stmtDate && (dbTxn.amount - stmtTxn.amount).abs() < 0.01) {
+            match = dbTxn;
+            usedDbIds.add(dbTxn.id);
+            break;
+          }
+        }
+
+        merged.add(MergedCCTransaction(
+          statementTxn: stmtTxn,
+          dbTxn: match,
+        ));
+      }
+
+      if (mounted) {
+        setState(() {
+          _mergedTransactions = merged;
+          _fetchingDb = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('[CCStatement] DB fetch error: $e');
+      if (mounted) {
+        // Fall back to statement-only
+        setState(() {
+          _mergedTransactions = result.transactions
+              .map((t) => MergedCCTransaction(statementTxn: t))
+              .toList();
+          _fetchingDb = false;
         });
       }
     }
@@ -232,6 +377,7 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
               ? _buildError()
               : TabBarView(
                   controller: _tabController,
+                  physics: const NeverScrollableScrollPhysics(),
                   children: [
                     _needsPassword
                         ? const Center(child: CircularProgressIndicator())
@@ -294,14 +440,14 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
   }
 
   Widget _buildTransactionsView() {
-    if (_parsing) {
-      return const Center(
+    if (_parsing || _fetchingDb) {
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('Parsing statement...'),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text(_parsing ? 'Parsing statement...' : 'Fetching DB transactions...'),
           ],
         ),
       );
@@ -348,22 +494,22 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
       );
     }
 
-    final txns = result.transactions;
+    final merged = _mergedTransactions ?? [];
     final cs = Theme.of(context).colorScheme;
+    final matchedCount = merged.where((m) => m.isMatched).length;
 
     return Column(
       children: [
-        // Summary card
-        _buildSummaryCard(result, cs),
-        // Transaction list
+        _buildSummaryCard(result, cs, matchedCount, merged.length),
+        // Transaction table
         Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            itemCount: txns.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+            itemCount: merged.length + 1, // +1 for header
             itemBuilder: (context, index) {
-              final txn = txns[index];
-              return _buildTransactionTile(txn, index + 1, cs);
+              if (index == 0) return _buildTableHeader(cs);
+              final txn = merged[index - 1];
+              return _buildMergedRow(txn, index, cs);
             },
           ),
         ),
@@ -371,7 +517,7 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
     );
   }
 
-  Widget _buildSummaryCard(CCStatementResult result, ColorScheme cs) {
+  Widget _buildSummaryCard(CCStatementResult result, ColorScheme cs, int matchedCount, int totalCount) {
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(16),
@@ -389,7 +535,7 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '${result.transactions.length} Transactions',
+                '$totalCount Transactions',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
@@ -414,7 +560,7 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
                 ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Row(
             children: [
               _summaryItem('Total Due',
@@ -423,10 +569,10 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
               _summaryItem('Min Due',
                   result.minimumDue != null ? formatINR(result.minimumDue!) : '-',
                   cs.tertiary, cs),
-              _summaryItem('Debits', formatINR(result.totalDebits),
-                  cs.onPrimaryContainer, cs),
-              _summaryItem('Credits', formatINR(result.totalCredits),
+              _summaryItem('Matched', '$matchedCount / $totalCount',
                   Colors.green, cs),
+              _summaryItem('Unmatched', '${totalCount - matchedCount}',
+                  Colors.orange, cs),
             ],
           ),
           if (result.billingPeriod != null) ...[
@@ -459,57 +605,215 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
     );
   }
 
-  Widget _buildTransactionTile(CCStatementTransaction txn, int index, ColorScheme cs) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      leading: CircleAvatar(
-        radius: 18,
-        backgroundColor: txn.isCredit
-            ? Colors.green.withValues(alpha: 0.15)
-            : cs.primaryContainer,
-        child: Text(
-          '$index',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: txn.isCredit ? Colors.green : cs.onPrimaryContainer,
-          ),
-        ),
+  Widget _buildTableHeader(ColorScheme cs) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
       ),
-      title: Row(
+      child: Row(
         children: [
-          Expanded(
-            child: Text(
-              txn.description,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+          SizedBox(
+            width: 70,
+            child: Text('Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: cs.onSurface)),
           ),
-          if (txn.isEmi)
-            Container(
-              margin: const EdgeInsets.only(left: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Text('EMI', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.orange)),
-            ),
+          Expanded(
+            flex: 3,
+            child: Text('Description', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: cs.onSurface)),
+          ),
+          SizedBox(
+            width: 72,
+            child: Text('DB Amt', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: cs.onSurface)),
+          ),
+          SizedBox(
+            width: 72,
+            child: Text('Stmt Amt', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: cs.onSurface)),
+          ),
         ],
       ),
-      subtitle: Text(
-        '${txn.date}  ${txn.time}',
-        style: TextStyle(fontSize: 12, color: cs.outline),
+    );
+  }
+
+  Widget _buildMergedRow(MergedCCTransaction txn, int index, ColorScheme cs) {
+    final isCCPayment = txn.isCredit; // Credit transactions = CC payments, skip highlighting
+    final hasCategory = txn.category != null && txn.category!.isNotEmpty;
+
+    // Background color logic:
+    // - CC payment (credit): neutral, no highlight
+    // - Matched with category: green
+    // - Matched without category: orange highlight (needs attention)
+    // - Not matched (not CC payment): orange highlight
+    final Color bgColor;
+    if (isCCPayment) {
+      bgColor = cs.surface;
+    } else if (txn.isMatched && hasCategory) {
+      bgColor = Colors.green.withValues(alpha: 0.05);
+    } else {
+      bgColor = Colors.orange.withValues(alpha: 0.06);
+    }
+
+    // Tappable if:
+    // 1. Not in DB and not a CC payment → tap to add expense
+    // 2. In DB but missing category/subcategory → tap to edit
+    final bool isTappable = (!txn.isMatched && !isCCPayment) ||
+        (txn.isMatched && !hasCategory);
+
+    return GestureDetector(
+      onTap: isTappable ? () => _onTransactionTap(txn) : null,
+      child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: index.isEven ? bgColor : bgColor.withValues(alpha: 0.02),
+        border: Border(bottom: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.3))),
       ),
-      trailing: Text(
-        '${txn.isCredit ? '+' : ''}${formatINR(txn.amount)}',
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 14,
-          color: txn.isCredit ? Colors.green : cs.onSurface,
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Date
+              SizedBox(
+                width: 70,
+                child: Text(
+                  txn.date,
+                  style: TextStyle(fontSize: 11, color: cs.onSurface),
+                ),
+              ),
+              // Description + category
+              Expanded(
+                flex: 3,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            txn.description,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: cs.onSurface,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (txn.isEmi)
+                          Container(
+                            margin: const EdgeInsets.only(left: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                            child: const Text('EMI', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.orange)),
+                          ),
+                        if (txn.isMatched)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: Icon(Icons.check_circle, size: 14, color: Colors.green.shade600),
+                          ),
+                      ],
+                    ),
+                    if (txn.isMatched && hasCategory)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          [txn.category, txn.subCategory].whereType<String>().where((s) => s.isNotEmpty).join(' › '),
+                          style: TextStyle(fontSize: 10, color: cs.primary),
+                        ),
+                      ),
+                    if (txn.isMatched && !hasCategory)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          txn.statementTxn.description,
+                          style: TextStyle(fontSize: 10, color: Colors.orange.shade700, fontStyle: FontStyle.italic),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    if (!txn.isMatched && !isCCPayment)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          'Not in DB',
+                          style: TextStyle(fontSize: 9, color: Colors.orange.shade700, fontStyle: FontStyle.italic),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // DB Amount
+              SizedBox(
+                width: 72,
+                child: Text(
+                  txn.dbAmount != null ? formatINR(txn.dbAmount!) : '-',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: txn.dbAmount != null ? cs.onSurface : cs.outline,
+                  ),
+                ),
+              ),
+              // Statement Amount
+              SizedBox(
+                width: 72,
+                child: Text(
+                  '${txn.isCredit ? '+' : ''}${formatINR(txn.statementAmount)}',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: txn.isCredit ? Colors.green : cs.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       ),
     );
+  }
+
+  void _onTransactionTap(MergedCCTransaction txn) async {
+    if (!txn.isMatched) {
+      // Not in DB → open Add Expense with prefilled date, account, amount, description
+      final card = _parsedResult?.detectedCard;
+      final prefill = TransactionModel(
+        id: '',
+        date: txn.statementTxn.normalizedDate,
+        description: txn.statementTxn.description,
+        amount: txn.statementAmount,
+        type: 'expense',
+        accountName: card?.accountName ?? '',
+        accountId: card?.accountId ?? '',
+      );
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => AddTransactionScreen(prefill: prefill),
+        ),
+      );
+    } else {
+      // In DB but missing category → open Edit with account & amount locked
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => AddTransactionScreen(
+            prefill: txn.dbTxn,
+            isEdit: true,
+            lockFields: const {'account', 'amount'},
+          ),
+        ),
+      );
+    }
+    // After returning, re-fetch DB transactions and re-merge
+    if (_parsedResult != null && mounted) {
+      _fetchAndMergeDbTransactions(_parsedResult!);
+    }
   }
 }

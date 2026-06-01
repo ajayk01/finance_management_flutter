@@ -251,7 +251,7 @@ class NotificationService {
 
     nav.push(
       MaterialPageRoute(
-        builder: (_) => CCStatementScreen(
+        builder: (_) => CCStatementScreen.fromMail(
           userId: userId,
           folderId: folderId,
           messageId: messageId,

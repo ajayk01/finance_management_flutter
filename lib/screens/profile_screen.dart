@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'add_account_screen.dart';
 import 'add_category_screen.dart';
 import 'add_credit_cap_screen.dart';
 import 'add_subcategory_screen.dart';
 import 'add_transfer_screen.dart';
 import 'analytics_screen.dart';
+import 'bank_statement_screen.dart';
+import 'cc_statement_screen.dart';
 import 'pay_cc_bill_screen.dart';
 import 'splitwise_screen.dart';
 import 'unaudited_expense_screen.dart';
@@ -102,10 +105,50 @@ class ProfileScreen extends StatelessWidget {
               title: 'Pay CC Bill',
               onTap: () => PayCcBillSheet.show(context),
             ),
+            const SizedBox(height: 20),
+            _buildSectionHeader('Statements'),
+            const SizedBox(height: 8),
+            _buildOptionTile(
+              icon: Icons.credit_card_outlined,
+              title: 'Upload CC Statement',
+              onTap: () => _pickAndOpenStatement(context, isCC: true),
+            ),
+            _buildOptionTile(
+              icon: Icons.account_balance_outlined,
+              title: 'Upload Bank Statement',
+              onTap: () => _pickAndOpenStatement(context, isCC: false),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _pickAndOpenStatement(BuildContext context, {required bool isCC}) async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf'],
+    );
+    if (result == null || result.files.isEmpty) return;
+    final path = result.files.single.path;
+    if (path == null) return;
+    if (!context.mounted) return;
+
+    if (isCC) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CCStatementScreen.fromFile(localPdfPath: path),
+        ),
+      );
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BankStatementScreen.fromFile(localPdfPath: path),
+        ),
+      );
+    }
   }
 
   Widget _buildTopBar(BuildContext context) {
