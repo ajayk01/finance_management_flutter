@@ -22,6 +22,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedNavIndex = 0;
+  String? _filterAccount;
   final _api = ApiService();
 
   // Data state
@@ -189,7 +190,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildBody() {
     switch (_selectedNavIndex) {
       case 1:
-        return const TransactionScreen();
+        final account = _filterAccount;
+        _filterAccount = null;
+        return TransactionScreen(initialAccount: account);
       case 2:
         return const InvestmentScreen();
       case 3:
@@ -213,6 +216,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     bankAccounts: _bankAccounts,
                     creditCards: _creditCards,
                     investmentAccounts: _investmentAccounts,
+                    onAccountTap: (accountName) {
+                      setState(() {
+                        _filterAccount = accountName;
+                        _selectedNavIndex = 1;
+                      });
+                    },
                   ),
                   const SizedBox(height: 28),
                   MonthlyBudget(

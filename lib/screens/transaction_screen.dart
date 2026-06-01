@@ -77,7 +77,9 @@ class _SpendCategory {
 // ─── Screen ──────────────────────────────────────────────────
 
 class TransactionScreen extends StatefulWidget {
-  const TransactionScreen({super.key});
+  final String? initialAccount;
+
+  const TransactionScreen({super.key, this.initialAccount});
 
   @override
   State<TransactionScreen> createState() => _TransactionScreenState();
@@ -103,6 +105,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialAccount != null) {
+      _selectedAccount = widget.initialAccount!;
+    }
     _loadTransactions();
   }
 
@@ -659,11 +664,16 @@ class _TransactionScreenState extends State<TransactionScreen> {
                           color: Colors.grey.shade700,
                         ),
                       ),
-                      Text(
-                        _categories.map((c) => formatINR(c.amount, decimals: 0)).join(' · '),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade500,
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          _categories.map((c) => formatINR(c.amount, decimals: 0)).join(' · '),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.end,
                         ),
                       ),
                     ],
@@ -816,7 +826,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
   Widget _buildAccountOption(
       BuildContext ctx, String name, String number, IconData icon) {
-    final label = '$name $number';
+    final label = number.isNotEmpty ? '$name $number' : name;
     final selected = _selectedAccount == label;
     return ListTile(
       contentPadding: EdgeInsets.zero,

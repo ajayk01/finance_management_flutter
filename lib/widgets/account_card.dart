@@ -7,12 +7,14 @@ class AccountCard extends StatefulWidget
   final List<BankAccount> bankAccounts;
   final List<CreditCardAccount> creditCards;
   final List<InvestmentAccount> investmentAccounts;
+  final void Function(String accountName)? onAccountTap;
 
   const AccountCard({
     super.key,
     this.bankAccounts = const [],
     this.creditCards = const [],
     this.investmentAccounts = const [],
+    this.onAccountTap,
   });
 
   @override
@@ -226,11 +228,14 @@ class _AccountCardState extends State<AccountCard> {
                           children: List.generate(accounts.length, (index) {
                             return Column(
                               children: [
-                                _buildAccountRow(
-                                  fallbackIcon,
-                                  accounts[index]['name']!,
-                                  accounts[index]['balance']!,
-                                  accounts[index]['logo'] ?? '',
+                                GestureDetector(
+                                  onTap: () => widget.onAccountTap?.call(accounts[index]['name']!),
+                                  child: _buildAccountRow(
+                                    fallbackIcon,
+                                    accounts[index]['name']!,
+                                    accounts[index]['balance']!,
+                                    accounts[index]['logo'] ?? '',
+                                  ),
                                 ),
                                 if (index < accounts.length - 1) _buildDivider(),
                               ],
