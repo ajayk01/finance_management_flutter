@@ -88,6 +88,12 @@ class AppDataCache {
     _incomeByCategoryCache.remove(key);
   }
 
+  void invalidateAllTransactionCaches() {
+    _transactionsCache.clear();
+    _expenseByCategoryCache.clear();
+    _incomeByCategoryCache.clear();
+  }
+
   // ─── Load from cache (SharedPreferences) ──────────────────
 
   Future<void> loadFromLocal() async {

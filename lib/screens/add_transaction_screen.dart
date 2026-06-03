@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/app_data_cache.dart';
@@ -32,6 +33,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   String? _accountError;
   String? _categoryError;
   String? _subCategoryError;
+  String _selectedFromAccount = '';
+  String _selectedToAccount = '';
+  String? _fromAccountError;
+  String? _toAccountError;
   final _api = ApiService();
 
   static const _typeIcons = [
@@ -77,7 +82,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         _selectedType = 3;
         break;
     }
-    _amountController.text = tx.amount.toStringAsFixed(0);
+    _amountController.text = tx.amount == tx.amount.roundToDouble() && tx.amount == tx.amount.truncateToDouble()
+        ? tx.amount.toStringAsFixed(0)
+        : tx.amount.toString();
     _descController.text = tx.description;
     try {
       _selectedDate = DateTime.parse(tx.date);
@@ -94,6 +101,16 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     if (tx.category != null) _selectedCategory = tx.category!;
     if (tx.subCategory != null) _selectedSubCategory = tx.subCategory!;
     if (tx.accountName != null) _selectedAccount = tx.accountName!;
+
+    // For Transfer: accountName is the from account
+    if (tx.type.toLowerCase() == 'transfer' && tx.accountName != null) {
+      _selectedFromAccount = tx.accountName!;
+    }
+    // For Investment: accountName is the from (bank) account, investmentAccountName is the to account
+    if (tx.type.toLowerCase() == 'investment') {
+      if (tx.accountName != null) _selectedFromAccount = tx.accountName!;
+      if (tx.investmentAccountName != null) _selectedToAccount = tx.investmentAccountName!;
+    }
 
     // Splitwise details
     final sw = tx.splitwiseDetails;
@@ -169,6 +186,15 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       }
       if (banks.isNotEmpty && _selectedAccount.isEmpty) {
         _selectedAccount = banks.first.name;
+      }
+      if (banks.isNotEmpty && _selectedFromAccount.isEmpty) {
+        _selectedFromAccount = banks.first.name;
+      }
+      if (invs.isNotEmpty && _selectedToAccount.isEmpty && _selectedType == 3) {
+        _selectedToAccount = invs.first.name;
+      }
+      if (banks.isNotEmpty && _selectedToAccount.isEmpty && _selectedType == 2 && banks.length > 1) {
+        _selectedToAccount = banks[1].name;
       }
       if (groups.isNotEmpty && _selectedGroup.isEmpty) {
         _selectedGroup = groups.first.name;
@@ -308,6 +334,21 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     return items;
   }
 
+  List<String> get _bankOnlyAccounts {
+    final items = <String>[];
+    for (final b in _bankAccounts) { items.add(b.name); }
+    for (final c in _creditCards) { items.add(c.name); }
+    if (items.isEmpty) return ['Chase Bank', 'Bank of America'];
+    return items;
+  }
+
+  List<String> get _investmentAccountNames {
+    final items = <String>[];
+    for (final a in _investmentAccounts) { items.add(a.name); }
+    if (items.isEmpty) return ['Investment Account'];
+    return items;
+  }
+
 
 
   List<String> get _splitGroups => _splitwiseGroups.isNotEmpty
@@ -351,24 +392,47 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
     // Validate tappable fields
     bool tappableValid = true;
+    final isTransferOrInvestment = _selectedType == 2 || _selectedType == 3;
     setState(() {
-      if (_selectedAccount.isEmpty) {
-        _accountError = 'Please select an account';
-        tappableValid = false;
-      } else {
+      if (isTransferOrInvestment) {
+        // Validate from/to accounts
         _accountError = null;
-      }
-      if (_selectedCategory.isEmpty) {
-        _categoryError = 'Please select a category';
-        tappableValid = false;
-      } else {
         _categoryError = null;
-      }
-      if (_selectedSubCategory.isEmpty) {
-        _subCategoryError = 'Please select a sub category';
-        tappableValid = false;
-      } else {
         _subCategoryError = null;
+        if (_selectedFromAccount.isEmpty) {
+          _fromAccountError = 'Please select a from account';
+          tappableValid = false;
+        } else {
+          _fromAccountError = null;
+        }
+        if (_selectedToAccount.isEmpty) {
+          _toAccountError = 'Please select a to account';
+          tappableValid = false;
+        } else {
+          _toAccountError = null;
+        }
+      } else {
+        // Validate single account + category/subcategory
+        _fromAccountError = null;
+        _toAccountError = null;
+        if (_selectedAccount.isEmpty) {
+          _accountError = 'Please select an account';
+          tappableValid = false;
+        } else {
+          _accountError = null;
+        }
+        if (_selectedCategory.isEmpty) {
+          _categoryError = 'Please select a category';
+          tappableValid = false;
+        } else {
+          _categoryError = null;
+        }
+        if (_selectedSubCategory.isEmpty) {
+          _subCategoryError = 'Please select a sub category';
+          tappableValid = false;
+        } else {
+          _subCategoryError = null;
+        }
       }
     });
 
@@ -564,26 +628,37 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           );
           break;
         case 2: // Transfer
-          final fromBank = _bankAccounts.firstWhere(
-            (b) => b.name == _selectedAccount,
-            orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
+          final fromAccount = _bankAccounts.firstWhere(
+            (b) => b.name == _selectedFromAccount,
+            orElse: () => _creditCards.isNotEmpty
+                ? BankAccount(id: _creditCards.firstWhere((c) => c.name == _selectedFromAccount, orElse: () => _creditCards.first).id, name: _selectedFromAccount, balance: 0)
+                : BankAccount(id: '', name: _selectedFromAccount, balance: 0),
+          );
+          final toAccount = _bankAccounts.firstWhere(
+            (b) => b.name == _selectedToAccount,
+            orElse: () => _creditCards.isNotEmpty
+                ? BankAccount(id: _creditCards.firstWhere((c) => c.name == _selectedToAccount, orElse: () => _creditCards.first).id, name: _selectedToAccount, balance: 0)
+                : BankAccount(id: '', name: _selectedToAccount, balance: 0),
           );
           await _api.addTransfer(
-            fromAccountId: int.tryParse(fromBank.id) ?? 0,
-            toAccountId: _bankAccounts.length > 1 ? (int.tryParse(_bankAccounts[1].id) ?? 0) : 0,
+            fromAccountId: int.tryParse(fromAccount.id) ?? 0,
+            toAccountId: int.tryParse(toAccount.id) ?? 0,
             amount: amount,
             date: dateStr,
             description: _descController.text,
           );
           break;
         case 3: // Investment
-          final inv = _investmentAccounts.firstWhere(
-            (a) => a.name == _selectedAccount,
-            orElse: () => InvestmentAccount(id: '', name: _selectedAccount),
+          final fromBank = _bankAccounts.firstWhere(
+            (b) => b.name == _selectedFromAccount,
+            orElse: () => BankAccount(id: '', name: _selectedFromAccount, balance: 0),
           );
-          final bank = _bankAccounts.isNotEmpty ? _bankAccounts.first : BankAccount(id: '', name: '', balance: 0);
+          final inv = _investmentAccounts.firstWhere(
+            (a) => a.name == _selectedToAccount,
+            orElse: () => InvestmentAccount(id: '', name: _selectedToAccount),
+          );
           await _api.addInvestment(
-            accountId: bank.id,
+            accountId: fromBank.id,
             investmentAccountId: inv.id,
             amount: amount,
             date: dateStr,
@@ -692,13 +767,16 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 controller: _amountController,
                 hint: '0',
                 icon: Icons.currency_rupee_outlined,
-                keyboardType: TextInputType.number,
+                keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
                 prefix: '₹ ',
                 readOnly: widget.fromNotification || widget.lockFields.contains('amount'),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^-?\d*\.?\d*')),
+                ],
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return 'Enter amount';
                   final parsed = double.tryParse(v.trim());
-                  if (parsed == null || parsed <= 0) return 'Enter a valid amount';
+                  if (parsed == null) return 'Enter a valid amount';
                   return null;
                 },
               ),
@@ -708,27 +786,48 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               _buildDateTimeField(),
               const SizedBox(height: 16),
 
-              // ── Account ──
-              _buildTappableField(
-                label: 'Account',
-                value: _selectedAccount,
-                icon: _isCreditCard
-                    ? Icons.credit_card
-                    : Icons.account_balance_outlined,
-                onTap: (widget.fromNotification || widget.lockFields.contains('account')) ? null : () => _showAccountPicker(),
-                errorText: _accountError,
-              ),
-              const SizedBox(height: 16),
+              // ── Account / From-To Accounts ──
+              if (_selectedType == 2 || _selectedType == 3) ...[
+                // From Account
+                _buildTappableField(
+                  label: 'From Account',
+                  value: _selectedFromAccount,
+                  icon: Icons.account_balance_outlined,
+                  onTap: (widget.fromNotification || widget.lockFields.contains('account')) ? null : () => _showFromAccountPicker(),
+                  errorText: _fromAccountError,
+                ),
+                const SizedBox(height: 16),
+                // To Account
+                _buildTappableField(
+                  label: 'To Account',
+                  value: _selectedToAccount,
+                  icon: _selectedType == 3 ? Icons.trending_up : Icons.account_balance_outlined,
+                  onTap: widget.lockFields.contains('account') ? null : () => _showToAccountPicker(),
+                  errorText: _toAccountError,
+                ),
+                const SizedBox(height: 16),
+              ] else ...[
+                _buildTappableField(
+                  label: 'Account',
+                  value: _selectedAccount,
+                  icon: _isCreditCard
+                      ? Icons.credit_card
+                      : Icons.account_balance_outlined,
+                  onTap: (widget.fromNotification || widget.lockFields.contains('account')) ? null : () => _showAccountPicker(),
+                  errorText: _accountError,
+                ),
+                const SizedBox(height: 16),
 
-              // ── Credit Cap ──
-              if (_isCreditCard) ...[
-                _buildCreditCapAlert(),
+                // ── Credit Cap ──
+                if (_isCreditCard) ...[
+                  _buildCreditCapAlert(),
+                  const SizedBox(height: 16),
+                ],
+
+                // ── Category & Sub Category ──
+                _buildCategoryRow(),
                 const SizedBox(height: 16),
               ],
-
-              // ── Category & Sub Category ──
-              _buildCategoryRow(),
-              const SizedBox(height: 16),
 
               // ── Description ──
               _buildTextField(
@@ -852,15 +951,30 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           final selected = _selectedType == i;
           return Expanded(
             child: GestureDetector(
-              onTap: () => setState(() {
-                _selectedType = i;
-                final cats = _categories;
-                if (cats.isNotEmpty) {
-                  _selectedCategory = cats.first;
-                  final subs = _subCategories[_selectedCategory] ?? ['Others'];
-                  _selectedSubCategory = subs.first;
-                }
-              }),
+              onTap: () {
+                FocusManager.instance.primaryFocus?.unfocus();
+                setState(() {
+                  _selectedType = i;
+                  // Sync account fields when switching between types
+                  if (i == 2 || i == 3) {
+                    // Switching to Transfer/Investment: carry Account → From Account
+                    if (_selectedAccount.isNotEmpty) {
+                      _selectedFromAccount = _selectedAccount;
+                    }
+                  } else {
+                    // Switching to Income/Expense: carry From Account → Account
+                    if (_selectedFromAccount.isNotEmpty) {
+                      _selectedAccount = _selectedFromAccount;
+                    }
+                  }
+                  final cats = _categories;
+                  if (cats.isNotEmpty) {
+                    _selectedCategory = cats.first;
+                    final subs = _subCategories[_selectedCategory] ?? ['Others'];
+                    _selectedSubCategory = subs.first;
+                  }
+                });
+              },
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
                 decoration: BoxDecoration(
@@ -945,6 +1059,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     String? Function(String?)? validator,
     int maxLines = 1,
     bool readOnly = false,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -964,6 +1079,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           validator: validator,
           maxLines: maxLines,
           readOnly: readOnly,
+          inputFormatters: inputFormatters,
           style: readOnly
               ? TextStyle(color: Colors.grey.shade500)
               : null,
@@ -1022,6 +1138,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           onTap: locked
               ? null
               : () async {
+            FocusManager.instance.primaryFocus?.unfocus();
             final pickedDate = await showDatePicker(
               context: context,
               initialDate: _selectedDate,
@@ -1094,7 +1211,12 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         ),
         const SizedBox(height: 8),
         GestureDetector(
-          onTap: onTap,
+          onTap: onTap == null
+              ? null
+              : () {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  onTap();
+                },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
@@ -1312,6 +1434,133 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   },
                 );
               }).toList(),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showFromAccountPicker() {
+    _showGenericAccountPicker(
+      title: 'Select From Account',
+      accounts: _bankOnlyAccounts,
+      selected: _selectedFromAccount,
+      onSelected: (val) {
+        setState(() {
+          _selectedFromAccount = val;
+          _fromAccountError = null;
+        });
+      },
+    );
+  }
+
+  void _showToAccountPicker() {
+    final accounts = _selectedType == 3 ? _investmentAccountNames : _bankOnlyAccounts;
+    _showGenericAccountPicker(
+      title: 'Select To Account',
+      accounts: accounts,
+      selected: _selectedToAccount,
+      onSelected: (val) {
+        setState(() {
+          _selectedToAccount = val;
+          _toAccountError = null;
+        });
+      },
+    );
+  }
+
+  void _showGenericAccountPicker({
+    required String title,
+    required List<String> accounts,
+    required String selected,
+    required ValueChanged<String> onSelected,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.6,
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1E293B),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: accounts.map((a) {
+                    final isSel = selected == a;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: isSel
+                              ? const Color(0xFF3B3BF9).withValues(alpha: 0.1)
+                              : const Color(0xFFF3F4F6),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          Icons.account_balance_outlined,
+                          size: 20,
+                          color: isSel
+                              ? const Color(0xFF3B3BF9)
+                              : Colors.grey.shade600,
+                        ),
+                      ),
+                      title: Text(
+                        a,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: isSel ? FontWeight.w600 : FontWeight.w500,
+                          color: isSel
+                              ? const Color(0xFF3B3BF9)
+                              : const Color(0xFF1E293B),
+                        ),
+                      ),
+                      trailing: isSel
+                          ? const Icon(Icons.check_circle,
+                              color: Color(0xFF3B3BF9), size: 22)
+                          : Icon(Icons.circle_outlined,
+                              color: Colors.grey.shade300, size: 22),
+                      onTap: () {
+                        onSelected(a);
+                        Navigator.pop(ctx);
+                      },
+                    );
+                  }).toList(),
                 ),
               ),
             ],

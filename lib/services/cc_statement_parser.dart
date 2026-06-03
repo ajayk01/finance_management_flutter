@@ -14,6 +14,7 @@ class DetectedCard {
   static const hdfc = DetectedCard('20', 'HDFC Diners Black', 'HDFC Diners');
   static const iciciAmazon = DetectedCard('7', 'Amazon Pay ICICI CC', 'ICICI Amazon Pay');
   static const iciciCoral = DetectedCard('9', 'ICICI Coral CC', 'ICICI Coral');
+  static const airtelAxis = DetectedCard('18', 'Airtel Axis CC', 'Airtel Axis');
   static const unknown = DetectedCard('', '', 'Unknown Card');
 }
 
@@ -71,6 +72,12 @@ class CCStatementParser {
     if (upper.contains('DINERS') || upper.contains('HDFC BANK')) {
       return DetectedCard.hdfc;
     }
+    if (upper.contains('AXIS BANK') && upper.contains('AIRTEL')) {
+      return DetectedCard.airtelAxis;
+    }
+    if (upper.contains('AXIS BANK')) {
+      return DetectedCard.airtelAxis; // Default Axis card
+    }
     return DetectedCard.unknown;
   }
 
@@ -113,9 +120,54 @@ class CCStatementParser {
       billingPeriod = '${billingMatch.group(1)} - ${billingMatch.group(2)}';
     }
 
+    // ── Billing period for Axis: "03/04/2026 - 01/05/2026" format ──
+    if (billingPeriod == null) {
+      final axisBillingMatch = RegExp(
+        r'(?:Statement\s*Period)[^\d]*(\d{2}/\d{2}/\d{4})\s*[-–]\s*(\d{2}/\d{2}/\d{4})',
+        caseSensitive: false,
+      ).firstMatch(fullText);
+      if (axisBillingMatch != null) {
+        final start = axisBillingMatch.group(1)!;
+        final end = axisBillingMatch.group(2)!;
+        // Convert DD/MM/YYYY to a parseable format
+        final sp = start.split('/');
+        final ep = end.split('/');
+        if (sp.length == 3 && ep.length == 3) {
+          billingPeriod = '${sp[0]}/${sp[1]}/${sp[2]} - ${ep[0]}/${ep[1]}/${ep[2]}';
+        }
+      }
+    }
+
+    // ── Due date for Axis: DD/MM/YYYY format ──
+    if (dueDate == null) {
+      final axisDueMatch = RegExp(
+        r'(?:Payment\s*Due\s*Date)[^\d]*(\d{2}/\d{2}/\d{4})',
+        caseSensitive: false,
+      ).firstMatch(fullText);
+      if (axisDueMatch != null) dueDate = axisDueMatch.group(1);
+    }
+
+    // ── Total/Min due for Axis: direct number format ──
+    if (totalAmountDue == null) {
+      final axisTotalMatch = RegExp(
+        r'(?:Total\s*Payment\s*Due)[^\d]*(\d[\d,]*\.\d{2})',
+        caseSensitive: false,
+      ).firstMatch(fullText);
+      if (axisTotalMatch != null) totalAmountDue = _parseAmount(axisTotalMatch.group(1)!);
+    }
+    if (minimumDue == null) {
+      final axisMinMatch = RegExp(
+        r'(?:Minimum\s*Payment\s*Due)[^\d]*(\d[\d,]*\.\d{2})',
+        caseSensitive: false,
+      ).firstMatch(fullText);
+      if (axisMinMatch != null) minimumDue = _parseAmount(axisMinMatch.group(1)!);
+    }
+
     // ── Parse transactions based on card type ──
     if (detectedCard == DetectedCard.iciciAmazon || detectedCard == DetectedCard.iciciCoral) {
       _parseICICITransactions(allLines, transactions);
+    } else if (detectedCard == DetectedCard.airtelAxis) {
+      _parseAxisTransactions(allLines, transactions);
     } else {
       _parseHDFCTransactions(allLines, transactions);
     }
@@ -237,6 +289,97 @@ class CCStatementParser {
         amount: amount,
         isCredit: isCredit,
         isEmi: false,
+      ));
+    }
+  }
+
+  // ── Axis Bank (Airtel Axis Rupay) format ──
+  // Table: DATE | TRANSACTION DETAILS | MERCHANT CATEGORY | AMOUNT (Rs.) Dr/Cr
+  static void _parseAxisTransactions(List<String> allLines, List<CCStatementTransaction> transactions) {
+    final dateOnly = RegExp(r'^(\d{2}/\d{2}/\d{4})\b');
+    // Amount with Dr/Cr suffix: "780.00 Dr" or "22,294.75 Cr"
+    final amountDrCr = RegExp(r'(\d{1,3}(?:,\d{2,3})*\.\d{2})\s*(Dr|Cr)', caseSensitive: false);
+    final endOfStatement = RegExp(r'End of Statement', caseSensitive: false);
+    final cashbackLine = RegExp(r'CASHBACK\s*DETAILS', caseSensitive: false);
+    final paymentSummaryLine = RegExp(r'PAYMENT\s*SUMMARY', caseSensitive: false);
+
+    for (int i = 0; i < allLines.length; i++) {
+      final line = allLines[i].trim();
+      if (line.isEmpty) continue;
+
+      // End markers — stop at end of statement or cashback section
+      if (endOfStatement.hasMatch(line) || cashbackLine.hasMatch(line) ||
+          paymentSummaryLine.hasMatch(line)) {
+        if (transactions.isNotEmpty) break; // Only break if we've already found transactions
+      }
+
+      // Skip header/non-data lines
+      if (line.startsWith('DATE') || line.contains('AMOUNT (Rs.)')) continue;
+      if (line.contains('TRANSACTION DETAILS') || line.contains('MERCHANT CATEGORY')) continue;
+      if (RegExp(r'Card\s*No', caseSensitive: false).hasMatch(line)) continue;
+
+      final dateMatch = dateOnly.firstMatch(line);
+      if (dateMatch == null) continue;
+
+      final date = dateMatch.group(1)!;
+      var rest = line.substring(dateMatch.end).trim();
+
+      // Find amount with Dr/Cr on this line
+      final amountMatch = amountDrCr.firstMatch(rest);
+      String desc;
+      double amount;
+      bool isCredit = false;
+
+      if (amountMatch != null) {
+        amount = _parseAmount(amountMatch.group(1)!);
+        isCredit = amountMatch.group(2)!.toUpperCase() == 'CR';
+        desc = rest.substring(0, amountMatch.start).trim();
+      } else {
+        // Amount might be on the next line(s)
+        desc = rest;
+        double? foundAmount;
+        bool foundCredit = false;
+
+        for (int j = i + 1; j < allLines.length && j <= i + 3; j++) {
+          final nextLine = allLines[j].trim();
+          if (nextLine.isEmpty) continue;
+          if (dateOnly.hasMatch(nextLine)) break;
+          if (endOfStatement.hasMatch(nextLine)) break;
+
+          final nextAmountMatch = amountDrCr.firstMatch(nextLine);
+          if (nextAmountMatch != null) {
+            foundAmount = _parseAmount(nextAmountMatch.group(1)!);
+            foundCredit = nextAmountMatch.group(2)!.toUpperCase() == 'CR';
+            final extraDesc = nextLine.substring(0, nextAmountMatch.start).trim();
+            if (extraDesc.isNotEmpty) {
+              desc = '$desc $extraDesc'.trim();
+            }
+            break;
+          }
+          // Continuation of description
+          desc = '$desc $nextLine'.trim();
+        }
+
+        if (foundAmount == null) continue;
+        amount = foundAmount;
+        isCredit = foundCredit;
+      }
+
+      // Clean up: remove merchant category keywords from end of description
+      desc = desc
+          .replaceFirst(RegExp(r'\s*(RESTAURANTS|UTILITIES|DEPT STORES|ENTERTAINMENT|TRAVEL|MISC STORE|FOOD PRODUCTS|GROCERY|FUEL|INSURANCE|MEDICAL|EDUCATION)\s*$', caseSensitive: false), '')
+          .trim();
+      desc = _cleanDescription(desc);
+
+      if (desc.isEmpty || desc.length < 3) continue;
+
+      transactions.add(CCStatementTransaction(
+        date: date,
+        time: '',
+        description: desc,
+        amount: amount,
+        isCredit: isCredit,
+        isEmi: desc.toUpperCase().contains('EMI'),
       ));
     }
   }
@@ -418,7 +561,18 @@ class CCStatementResult {
 
   static DateTime? _parseDateStr(String s) {
     // Handles: "29 Apr, 2026", "28 May 2026", "April 29, 2026", "May 28, 2026"
+    // Also handles: "03/04/2026" (DD/MM/YYYY)
     final cleaned = s.replaceAll(',', '').trim();
+
+    // Try DD/MM/YYYY format
+    var dm = RegExp(r'(\d{2})/(\d{2})/(\d{4})').firstMatch(cleaned);
+    if (dm != null) {
+      final day = int.tryParse(dm.group(1)!) ?? 1;
+      final month = int.tryParse(dm.group(2)!) ?? 1;
+      final year = int.tryParse(dm.group(3)!) ?? 2026;
+      return DateTime(year, month, day);
+    }
+
     final months = {
       'jan': 1, 'january': 1, 'feb': 2, 'february': 2, 'mar': 3, 'march': 3,
       'apr': 4, 'april': 4, 'may': 5, 'jun': 6, 'june': 6,

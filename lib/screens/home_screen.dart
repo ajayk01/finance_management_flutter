@@ -170,13 +170,17 @@ class _HomeScreenState extends State<HomeScreen> {
         onTap: (index) => setState(() => _selectedNavIndex = index),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
+        onPressed: () async {
+          final result = await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (_) => const AddTransactionScreen(),
             ),
           );
+          if (result == true) {
+            AppDataCache().invalidateAllTransactionCaches();
+            _loadData();
+          }
         },
         backgroundColor: const Color(0xFF3B3BF9),
         elevation: 4,

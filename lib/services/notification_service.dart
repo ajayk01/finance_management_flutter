@@ -30,6 +30,8 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   bool _isInitialized = false;
+  RemoteMessage? _pendingNotification;
+  Map<String, dynamic>? _pendingLocalNotificationData;
 
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -38,6 +40,7 @@ class NotificationService {
 
     await _requestPermission();
     await setupLocalNotifications();
+    await _checkLaunchNotification();
     _setupMessageHandlers();
 
     final token = await _messaging.getToken();
@@ -126,6 +129,22 @@ class NotificationService {
         ?.createNotificationChannel(channel);
   }
 
+  /// Check if the app was launched by tapping a local notification (cold start)
+  Future<void> _checkLaunchNotification() async {
+    final launchDetails =
+        await _localNotifications.getNotificationAppLaunchDetails();
+    if (launchDetails != null &&
+        launchDetails.didNotificationLaunchApp &&
+        launchDetails.notificationResponse != null) {
+      final payload = launchDetails.notificationResponse!.payload;
+      if (payload != null) {
+        final data = jsonDecode(payload) as Map<String, dynamic>;
+        debugPrint('[FCM] App launched from local notification with data: $data');
+        _pendingLocalNotificationData = data;
+      }
+    }
+  }
+
   void _setupMessageHandlers() {
     // Foreground messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
@@ -142,7 +161,9 @@ class NotificationService {
     // When app is opened from a terminated state via notification
     _messaging.getInitialMessage().then((message) {
       if (message != null) {
-        _handleNotificationTap(message);
+        // Store for later if navigator isn't ready yet
+        _pendingNotification = message;
+        _tryHandlePendingNotification();
       }
     });
   }
@@ -180,27 +201,66 @@ class NotificationService {
     if (payload != null) {
       final data = jsonDecode(payload) as Map<String, dynamic>;
       debugPrint('Notification tapped with data: $data');
-      if (data['isCCStatment'] == 'true' || data['isCCStatment'] == true) {
-        _navigateToCCStatement(data);
-      } else {
-        final tnxId = data['tnxId'] as String?;
-        if (tnxId != null) {
-          _navigateToTransaction(tnxId);
-        }
+      final nav = navigatorKey.currentState;
+      if (nav == null) {
+        // Navigator not ready yet (cold start), defer navigation
+        _pendingLocalNotificationData = data;
+        _tryHandlePendingLocalNotification();
+        return;
       }
+      _routeNotificationData(data);
     }
   }
 
-  void _handleNotificationTap(RemoteMessage message) {
-    debugPrint('Notification opened app with data: ${message.data}');
-    if (message.data['isCCStatment'] == 'true' || message.data['isCCStatment'] == true) {
-      _navigateToCCStatement(message.data);
+  void _tryHandlePendingLocalNotification() {
+    if (_pendingLocalNotificationData == null) return;
+    final nav = navigatorKey.currentState;
+    if (nav == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _tryHandlePendingLocalNotification();
+      });
+      return;
+    }
+    final data = _pendingLocalNotificationData!;
+    _pendingLocalNotificationData = null;
+    _routeNotificationData(data);
+  }
+
+  void _routeNotificationData(Map<String, dynamic> data) {
+    if (data['isCCStatment'] == 'true' || data['isCCStatment'] == true) {
+      _navigateToCCStatement(data);
     } else {
-      final tnxId = message.data['tnxId'] as String?;
+      final tnxId = (data['tnxId'] ?? data['transactionId']) as String?;
       if (tnxId != null) {
         _navigateToTransaction(tnxId);
       }
     }
+  }
+
+  /// Called after the navigator is ready to process any pending notifications
+  void processPendingNotifications() {
+    _tryHandlePendingNotification();
+    _tryHandlePendingLocalNotification();
+  }
+
+  void _tryHandlePendingNotification() {
+    if (_pendingNotification == null) return;
+    final nav = navigatorKey.currentState;
+    if (nav == null) {
+      // Navigator not ready yet, wait for next frame
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _tryHandlePendingNotification();
+      });
+      return;
+    }
+    final message = _pendingNotification!;
+    _pendingNotification = null;
+    _handleNotificationTap(message);
+  }
+
+  void _handleNotificationTap(RemoteMessage message) {
+    debugPrint('Notification opened app with data: ${message.data}');
+    _routeNotificationData(Map<String, dynamic>.from(message.data));
   }
 
   void _navigateToTransaction(String tnxId) async {

@@ -120,7 +120,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
     final year = _currentDate.year.toString();
     final cache = AppDataCache();
 
-    // Show cached data immediately if available
+    // Show cached data immediately as placeholder (non-blocking)
     if (cache.hasTransactionCache(month, year)) {
       final cachedTx = cache.getCachedTransactions(month, year)!;
       final cachedExp = cache.getCachedExpenseByCategory(month, year) ?? {};
@@ -133,10 +133,15 @@ class _TransactionScreenState extends State<TransactionScreen> {
         _apiIncomeByCategory = cachedInc;
         _loading = false;
       });
-      return;
+    } else {
+      setState(() => _loading = true);
     }
 
-    setState(() => _loading = true);
+    // Always fetch fresh data from API
+    await _fetchAndUpdateTransactions(month, year, cache);
+  }
+
+  Future<void> _fetchAndUpdateTransactions(String month, String year, AppDataCache cache) async {
     try {
       final results = await Future.wait([
         _api.getAllTransactions(month: month, year: year),
@@ -301,10 +306,13 @@ class _TransactionScreenState extends State<TransactionScreen> {
           .toList();
     }
 
-    // Filter by account
+    // Filter by account (for transfers/investments, also match destination account)
     if (_selectedAccount != 'All') {
       filtered = filtered
-          .where((t) => t.accountName == _selectedAccount)
+          .where((t) =>
+              t.accountName == _selectedAccount ||
+              (t.type.toLowerCase() == 'transfer' && t.subCategory == _selectedAccount) ||
+              (t.type.toLowerCase() == 'investment' && t.investmentAccountName == _selectedAccount))
           .toList();
     }
 
@@ -689,12 +697,17 @@ class _TransactionScreenState extends State<TransactionScreen> {
           Expanded(
             child: RefreshIndicator(
               onRefresh: _refreshTransactions,
-              child: ListView.builder(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: _filteredGroups.length,
-                itemBuilder: (context, i) =>
-                    _buildDayGroupWidget(_filteredGroups[i]),
+              child: Builder(
+                builder: (context) {
+                  final groups = _filteredGroups;
+                  return ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    itemCount: groups.length,
+                    itemBuilder: (context, i) =>
+                        _buildDayGroupWidget(groups[i]),
+                  );
+                },
               ),
             ),
           ),
@@ -1106,7 +1119,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
       MaterialPageRoute(
         builder: (_) => AddTransactionScreen(prefill: tx),
       ),
-    ).then((_) => _refreshTransactions());
+    ).then((result) {
+      if (result == true) _refreshTransactions();
+    });
   }
 
   void _showEditDialog(TransactionModel tx) {
@@ -1115,7 +1130,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
       MaterialPageRoute(
         builder: (_) => AddTransactionScreen(prefill: tx, isEdit: true),
       ),
-    ).then((_) => _refreshTransactions());
+    ).then((result) {
+      if (result == true) _refreshTransactions();
+    });
   }
 
   Future<void> _refreshTransactions() async {

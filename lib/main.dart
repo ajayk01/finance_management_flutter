@@ -33,8 +33,21 @@ void main() async {
   runApp(const FinanceApp());
 }
 
-class FinanceApp extends StatelessWidget {
+class FinanceApp extends StatefulWidget {
   const FinanceApp({super.key});
+
+  @override
+  State<FinanceApp> createState() => _FinanceAppState();
+}
+
+class _FinanceAppState extends State<FinanceApp> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      NotificationService.instance.processPendingNotifications();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
