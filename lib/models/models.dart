@@ -146,15 +146,12 @@ class TransactionModel {
   });
 
   factory TransactionModel.fromJson(Map<String, dynamic> json) {
-    String date = json['date'] ?? '';
-    String? time = json['time'];
+    String date = (json['date'] ?? '').toString();
+    String? time = json['time']?.toString();
 
-    // If date contains time (e.g. "2026-05-27 14:05"), split them
-    if (time == null && date.contains(' ')) {
-      final parts = date.split(' ');
-      date = parts[0];
-      time = parts.sublist(1).join(' ');
-    }
+    final normalized = _normalizeDateAndTime(date, time);
+    date = normalized.date;
+    time = normalized.time;
 
     return TransactionModel(
         id: json['id'].toString(),
@@ -177,6 +174,99 @@ class TransactionModel {
         includeSplitwise: json['includeSplitwise'] == true,
         splitType: json['splitType']?.toString(),
       );
+  }
+
+  static ({String date, String? time}) _normalizeDateAndTime(
+    String date,
+    String? time,
+  ) {
+    // Accept epoch timestamps from backend (seconds or milliseconds).
+    final epochDate = int.tryParse(date);
+    if (epochDate != null) {
+      final dt = _epochToLocalDateTime(epochDate);
+      return (date: _formatDate(dt), time: _formatTime(dt));
+    }
+
+    // If date already contains full date-time, parse and normalize to local.
+    if (date.contains('T') || date.contains(' ')) {
+      final parsed = DateTime.tryParse(date);
+      if (parsed != null) {
+        final local = parsed.toLocal();
+        return (date: _formatDate(local), time: _formatTime(local));
+      }
+
+      // Fallback for non-ISO forms like "yyyy-MM-dd HH:mm:ss".
+      if (time == null && date.contains(' ')) {
+        final parts = date.split(' ');
+        date = parts.first;
+        time = parts.sublist(1).join(' ');
+      }
+    }
+
+    if (time == null || time.trim().isEmpty) {
+      return (date: date, time: null);
+    }
+
+    final normalizedTime = _normalizeTimeWithDate(date, time);
+    if (normalizedTime != null) {
+      return (date: normalizedTime.date, time: normalizedTime.time);
+    }
+
+    // Keep human-entered plain times ("HH:mm", "hh:mm a") as-is.
+    return (date: date, time: time.trim());
+  }
+
+  static DateTime _epochToLocalDateTime(int epoch) {
+    final isMilliseconds = epoch.abs() > 9999999999;
+    return DateTime.fromMillisecondsSinceEpoch(
+      isMilliseconds ? epoch : epoch * 1000,
+      isUtc: true,
+    ).toLocal();
+  }
+
+  static ({String date, String time})? _normalizeTimeWithDate(
+    String date,
+    String time,
+  ) {
+    final trimmed = time.trim();
+
+    // If time already carries timezone/ISO markers, parse with date and convert.
+    if (trimmed.contains('Z') || trimmed.contains('+') || trimmed.contains('-') || trimmed.contains('T')) {
+      final attempt = DateTime.tryParse('${date}T$trimmed');
+      if (attempt != null) {
+        final local = attempt.toLocal();
+        return (date: _formatDate(local), time: _formatTime(local));
+      }
+      final direct = DateTime.tryParse(trimmed);
+      if (direct != null) {
+        final local = direct.toLocal();
+        return (date: _formatDate(local), time: _formatTime(local));
+      }
+    }
+
+    // Trim seconds/millis for standard HH:mm(:ss[.sss]) inputs.
+    final timeOnlyMatch = RegExp(r'^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$').firstMatch(trimmed);
+    if (timeOnlyMatch != null) {
+      final h = (int.tryParse(timeOnlyMatch.group(1)!) ?? 0)
+          .toString()
+          .padLeft(2, '0');
+      final m = timeOnlyMatch.group(2)!;
+      return (date: date, time: '$h:$m');
+    }
+
+    return null;
+  }
+
+  static String _formatDate(DateTime dt) {
+    final m = dt.month.toString().padLeft(2, '0');
+    final d = dt.day.toString().padLeft(2, '0');
+    return '${dt.year}-$m-$d';
+  }
+
+  static String _formatTime(DateTime dt) {
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '$h:$m';
   }
 }
 

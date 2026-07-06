@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'dart:math';
 import '../services/api_service.dart';
-import '../services/app_data_cache.dart';
 import '../models/models.dart' show Category;
 import '../utils/currency_formatter.dart';
 
@@ -63,15 +62,15 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
         _api.getMonthlyExpenses(month: month, year: year),
         _api.getMonthlyIncome(month: month, year: year),
         _api.getMonthlyInvestments(month: month, year: year),
+        _api.getCategories(type: 'expense'),
       ]);
 
       _categories = _parseCategories(results[0], _expenseColors);
       _incomeCategories = _parseCategories(results[1], _incomeColors);
       _investmentCategories = _parseCategories(results[2], _investColors);
 
-      final cache = AppDataCache();
-      await cache.ensureCategories();
-      _budget = cache.categories
+      _budget = (results[3]['categories'] as List? ?? [])
+          .map((j) => Category.fromJson(j))
           .where((Category c) => c.type == 'expense')
           .fold<double>(0, (sum, c) => sum + c.budget);
     } catch (_) {

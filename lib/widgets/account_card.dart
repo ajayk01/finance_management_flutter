@@ -26,7 +26,6 @@ class _AccountCardState extends State<AccountCard> {
   int _currentPage = 0;
 
   List<Map<String, dynamic>> get _pages {
-    debugPrint('Bank Accounts: ${widget.bankAccounts}, Credit Cards: ${widget.creditCards}, Investment Accounts: ${widget.investmentAccounts}');
     final bankList = widget.bankAccounts.isNotEmpty
         ? widget.bankAccounts
             .map((a) => {'name': a.name, 'balance': formatINR(a.balance), 'logo': a.logo ?? ''})
@@ -45,7 +44,7 @@ class _AccountCardState extends State<AccountCard> {
           ];
     final invList = widget.investmentAccounts.isNotEmpty
         ? widget.investmentAccounts
-            .map((a) => {'name': a.name, 'balance': formatINR(a.totalInvested), 'logo': ''})
+            .map((a) => {'name': a.name, 'balance': formatINR(a.currentValue), 'logo': ''})
             .toList()
         : <Map<String, String>>[
             {'name': 'Vanguard S&P 500', 'balance': '₹45,200.00', 'logo': ''},

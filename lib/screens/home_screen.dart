@@ -1,8 +1,8 @@
+import 'package:finance_app/services/direct_sql_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
-import '../services/app_data_cache.dart';
 import '../widgets/account_card.dart';
 import '../widgets/expense_pie_chart.dart';
 import '../widgets/monthly_budget.dart';
@@ -43,29 +43,15 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadCachedData();
     _loadData();
   }
 
-  Future<void> _loadCachedData() async {
-    final cache = AppDataCache();
-    await cache.loadFromLocal();
-
-    if (mounted) {
-      final banks = cache.activeBankAccounts;
-      final cards = cache.activeCreditCardAccounts;
-      final investments = cache.activeInvestmentAccounts;
-      final List<Category> cats = cache.categories;
-      final totalBudget = cats.fold<double>(0, (sum, c) => sum + c.budget);
-
-      setState(() {
-        _bankAccounts = banks;
-        _creditCards = cards;
-        _investmentAccounts = investments;
-        _categories = cats;
-        _budgetTotal = totalBudget;
-        _loading = false;
-      });
+  Future<ActiveAccountsResult> _safeFetchAccounts(String month, String year) async {
+    try {
+      return await DirectSqlService.getAllActiveAccounts();
+    } catch (e) {
+      debugPrint('[HomeScreen] getAccounts failed: $e');
+      return const ActiveAccountsResult();
     }
   }
 
@@ -96,43 +82,32 @@ class _HomeScreenState extends State<HomeScreen> {
     final month = DateFormat('MMM').format(now).toLowerCase();
     final year = now.year.toString();
 
+    final accountsFuture = _safeFetchAccounts(month, year);
+    final typesSumFuture = DirectSqlService.getTransactionTypesSum(month, year).catchError((e) {
+      debugPrint('[HomeScreen] getTransactionTypesSum failed: $e');
+      return <String, double>{'total_income': 0, 'total_expense': 0, 'total_investment': 0};
+    });
+
     final results = await Future.wait([
-      _safeFetch('getAccounts', () => _api.getAccounts()),
-      _safeFetch('getMonthlyIncome', () => _api.getMonthlyIncome(month: month, year: year)),
-      _safeFetch('getMonthlyExpenses', () => _api.getMonthlyExpenses(month: month, year: year)),
-      _safeFetch('getMonthlyInvestments', () => _api.getMonthlyInvestments(month: month, year: year)),
       _safeFetch('getCategories', () => _api.getCategories(type: 'expense')),
       _safeFetch('getYearlySummary', () => _api.getYearlySummary(year)),
     ]);
 
-    final accountsData = results[0];
-    final incomeData = results[1];
-    final expenseData = results[2];
-    final investmentData = results[3];
-    final categoriesData = results[4];
-    final yearlyData = results[5];
+    final accountsData = await accountsFuture;
+    final typeSums = await typesSumFuture;
+    final categoriesData = results[0];
+    final yearlyData = results[1];
 
-    // Update centralized cache with fresh data
-    final cache = AppDataCache();
-    if (accountsData.isNotEmpty) cache.updateAccounts(accountsData);
-    if (categoriesData.isNotEmpty) cache.updateCategories(categoriesData);
+    final banks = accountsData.bankAccounts;
+    final cards = accountsData.creditCardAccounts;
+    final investments = accountsData.investmentAccounts;
 
-    final banks = cache.activeBankAccounts;
-    final cards = cache.activeCreditCardAccounts;
-    final investments = cache.activeInvestmentAccounts;
+    final double income = typeSums['total_income'] ?? 0;
+    final double expense = typeSums['total_expense'] ?? 0;
+    final double investment = typeSums['total_investment'] ?? 0;
 
-    double income = 0, expense = 0, investment = 0;
-    for (final e in (incomeData['monthlyIncome'] as List? ?? [])) {
-      income += _parseAmount(e['expense']);
-    }
-    for (final e in (expenseData['monthlyExpenses'] as List? ?? [])) {
-      expense += _parseAmount(e['expense']);
-    }
-    for (final e in (investmentData['monthlyInvestments'] as List? ?? [])) {
-      investment += _parseAmount(e['expense']);
-    }
-
-    final List<Category> cats = cache.categories
+    final List<Category> cats = (categoriesData['categories'] as List? ?? [])
+      .map((j) => Category.fromJson(j))
         .where((c) => c.type == 'expense')
         .toList();
     final totalBudget =
@@ -178,7 +153,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           );
           if (result == true) {
-            AppDataCache().invalidateAllTransactionCaches();
             _loadData();
           }
         },
