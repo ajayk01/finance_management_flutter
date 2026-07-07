@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' hide Category;
 import 'package:finance_app/models/models.dart';
 import 'package:finance_app/services/mysql_service.dart';
 
@@ -210,23 +211,65 @@ class DirectSqlService
         };
     }
 
-    static Future<List<Category>> getExpenseCategories() async
+    static Future<({List<Category> categories, double totalIncome, double totalExpense, double totalInvestment})> getExpenseCategories(String month, String year) async
     {
-        const sql = "SELECT "
-            "c.ID AS category_id, "
-            "c.CATEGORY_NAME AS category_name, "
-            "c.BUDGET AS category_budget, "
-            "c.CATEGORY_TYPE AS category_type, "
-            "s.ID AS sub_category_id, "
-            "s.CATEGORY_ID AS sub_category_parent_id, "
-            "s.SUB_CATEGORY_NAME AS sub_category_name, "
-            "s.BUDGET AS sub_category_budget "
+        final range = _getMonthRangeTimestamps(month, year);
+        final fromTimestamp = range.fromTimestamp;
+        final toTimestamp = range.toTimestamp;
+
+        // Pre-calculate all splits once to avoid redundant subqueries
+        final sql = "WITH splits AS ("
+            "  SELECT TRANSACTION_ID, SUM(SPLITED_AMOUNT) AS total_split "
+            "  FROM SplitwiseTransactions "
+            "  GROUP BY TRANSACTION_ID"
+            "), "
+            "expense_income_summary AS ("
+            "  SELECT t.CATEGORY_ID, SUM(t.AMOUNT - COALESCE(s.total_split, 0)) AS total_amount "
+            "  FROM Transactions t "
+            "  LEFT JOIN splits s ON s.TRANSACTION_ID = t.ID "
+            "  WHERE t.TRANSCATION_TYPE IN (1, 2) "
+            "  AND t.DATE >= $fromTimestamp AND t.DATE <= $toTimestamp "
+            "  GROUP BY t.CATEGORY_ID"
+            "), "
+            "investment_summary AS ("
+            "  SELECT t.FROM_ACCOUNT_ID, SUM(t.AMOUNT - COALESCE(s.total_split, 0)) AS total_amount "
+            "  FROM Transactions t "
+            "  LEFT JOIN splits s ON s.TRANSACTION_ID = t.ID "
+            "  WHERE t.TRANSCATION_TYPE = 3 "
+            "  AND t.DATE >= $fromTimestamp AND t.DATE <= $toTimestamp "
+            "  GROUP BY t.FROM_ACCOUNT_ID"
+            ") "
+            "SELECT "
+            "  c.ID AS category_id, "
+            "  c.CATEGORY_NAME AS category_name, "
+            "  c.BUDGET AS category_budget, "
+            "  c.CATEGORY_TYPE AS category_type, "
+            "  s.ID AS sub_category_id, "
+            "  s.CATEGORY_ID AS sub_category_parent_id, "
+            "  s.SUB_CATEGORY_NAME AS sub_category_name, "
+            "  s.BUDGET AS sub_category_budget, "
+            "  COALESCE(eis.total_amount, 0) AS category_total_amount "
             "FROM Category c "
             "LEFT JOIN SubCategory s ON s.CATEGORY_ID = c.ID "
-            "WHERE c.CATEGORY_TYPE = 1 "
-            "ORDER BY c.CATEGORY_NAME ASC, s.SUB_CATEGORY_NAME ASC";
+            "LEFT JOIN expense_income_summary eis ON eis.CATEGORY_ID = c.ID "
+            "WHERE c.CATEGORY_TYPE IN (1, 2) "
+            "UNION ALL "
+            "SELECT "
+            "  CONCAT('inv_', a.ID) AS category_id, "
+            "  a.ACCOUNT_NAME AS category_name, "
+            "  0 AS category_budget, "
+            "  3 AS category_type, "
+            "  NULL AS sub_category_id, "
+            "  NULL AS sub_category_parent_id, "
+            "  NULL AS sub_category_name, "
+            "  0 AS sub_category_budget, "
+            "  COALESCE(inv.total_amount, 0) AS category_total_amount "
+            "FROM Accounts a "
+            "LEFT JOIN investment_summary inv ON inv.FROM_ACCOUNT_ID = a.ID "
+            "WHERE EXISTS (SELECT 1 FROM investment_summary WHERE FROM_ACCOUNT_ID = a.ID) "
+            "ORDER BY category_name ASC, sub_category_name ASC";
 
-        print('Executing for expense SQL: $sql');
+        debugPrint('getExpenseCategories optimized SQL:\n$sql', wrapWidth: 1024);
         final config = MySqlConfig.fromDotEnv();
         final service = MySqlService();
         await service.connect(config);
@@ -248,7 +291,8 @@ class DirectSqlService
             final categoryName = rowMap['category_name']?.toString() ?? '';
             final categoryBudget = _toDouble(rowMap['category_budget']);
             final categoryTypeValue = int.tryParse(rowMap['category_type']?.toString() ?? '0') ?? 0;
-            final categoryType = categoryTypeValue == 1 ? 'expense' : '';
+            final categoryType = categoryTypeValue == 1 ? 'expense' : categoryTypeValue == 2 ? 'income' : 'investment';
+            final categoryTotalAmount = _toDouble(rowMap['category_total_amount']);
 
             if (existing == null) {
                 categoriesById[categoryId] = Category(
@@ -256,6 +300,7 @@ class DirectSqlService
                     name: categoryName,
                     budget: categoryBudget,
                     type: categoryType,
+                    amount: categoryTotalAmount,
                     subCategories: const [],
                 );
             }
@@ -279,12 +324,29 @@ class DirectSqlService
                     name: currentCategory.name,
                     budget: currentCategory.budget,
                     type: currentCategory.type,
+                    amount: currentCategory.amount,
                     subCategories: updatedSubCategories,
                 );
             }
         }
 
-        return categoriesById.values.toList();
+        final categories = categoriesById.values.toList();
+
+        double totalIncome = 0;
+        double totalExpense = 0;
+        double totalInvestment = 0;
+        for (final cat in categories) {
+            if (cat.type == 'expense') totalExpense += cat.amount;
+            else if (cat.type == 'income') totalIncome += cat.amount;
+            else if (cat.type == 'investment') totalInvestment += cat.amount;
+        }
+
+        return (
+            categories: categories,
+            totalIncome: totalIncome,
+            totalExpense: totalExpense,
+            totalInvestment: totalInvestment,
+        );
     }
 
 
