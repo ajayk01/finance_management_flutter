@@ -46,10 +46,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadData();
   }
 
-  Future<ActiveAccountsResult> _safeFetchAccounts(String month, String year) async {
-    try {
+  Future<ActiveAccountsResult> _safeFetchAccounts(String month, String year) async 
+  {
+    try 
+    {
       return await DirectSqlService.getAllActiveAccounts();
-    } catch (e) {
+    } 
+    catch (e) 
+    {
       debugPrint('[HomeScreen] getAccounts failed: $e');
       return const ActiveAccountsResult();
     }
@@ -67,16 +71,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  double _parseAmount(dynamic value) {
-    if (value == null) return 0;
-    if (value is num) return value.toDouble();
-    if (value is String) {
-      final cleaned = value.replaceAll(RegExp(r'[^0-9.\-]'), '');
-      return double.tryParse(cleaned) ?? 0;
-    }
-    return 0;
-  }
-
   Future<void> _loadData() async {
     final now = DateTime.now();
     final month = DateFormat('MMM').format(now).toLowerCase();
@@ -88,15 +82,20 @@ class _HomeScreenState extends State<HomeScreen> {
       return <String, double>{'total_income': 0, 'total_expense': 0, 'total_investment': 0};
     });
 
+   final expenseCategoriesFuture = DirectSqlService.getExpenseCategories().catchError((e) 
+   {
+      debugPrint('[HomeScreen] getExpenseCategories failed: $e');
+    return <Category>[];
+    });
+
     final results = await Future.wait([
-      _safeFetch('getCategories', () => _api.getCategories(type: 'expense')),
       _safeFetch('getYearlySummary', () => _api.getYearlySummary(year)),
     ]);
 
     final accountsData = await accountsFuture;
     final typeSums = await typesSumFuture;
-    final categoriesData = results[0];
-    final yearlyData = results[1];
+    final expenseCategories = await expenseCategoriesFuture;
+    final yearlyData = results[0];
 
     final banks = accountsData.bankAccounts;
     final cards = accountsData.creditCardAccounts;
@@ -106,8 +105,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final double expense = typeSums['total_expense'] ?? 0;
     final double investment = typeSums['total_investment'] ?? 0;
 
-    final List<Category> cats = (categoriesData['categories'] as List? ?? [])
-      .map((j) => Category.fromJson(j))
+    final List<Category> cats = (expenseCategories as List<Category>? ?? [])
         .where((c) => c.type == 'expense')
         .toList();
     final totalBudget =

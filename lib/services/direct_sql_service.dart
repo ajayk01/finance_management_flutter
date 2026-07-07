@@ -15,6 +15,19 @@ class ActiveAccountsResult {
 
 class DirectSqlService 
 {
+    static double _toDouble(dynamic value) {
+        if (value == null) {
+            return 0;
+        }
+        if (value is num) {
+            return value.toDouble();
+        }
+        if (value is String) {
+            return double.tryParse(value) ?? 0;
+        }
+        return 0;
+    }
+
     static int _monthToNumber(String month) {
         final normalized = month.trim().toLowerCase();
         switch (normalized) {
@@ -187,11 +200,91 @@ class DirectSqlService
         await service.connect(config);
         final results = await service.executeReadQuery(sql);
         print('getAccountsSum results: $results');
+        final rows = (results['rows'] as List? ?? []);
+        final firstRow = rows.isNotEmpty ? Map<String, dynamic>.from(rows.first as Map) : const <String, dynamic>{};
+
         return {
-            'total_income': results[0]['total_income'],
-            'total_expense': results[0]['total_expense'],
-            'total_investment': results[0]['total_investment'],
+            'total_income': _toDouble(firstRow['total_income']),
+            'total_expense': _toDouble(firstRow['total_expense']),
+            'total_investment': _toDouble(firstRow['total_investment']),
         };
+    }
+
+    static Future<List<Category>> getExpenseCategories() async
+    {
+        const sql = "SELECT "
+            "c.ID AS category_id, "
+            "c.CATEGORY_NAME AS category_name, "
+            "c.BUDGET AS category_budget, "
+            "c.CATEGORY_TYPE AS category_type, "
+            "s.ID AS sub_category_id, "
+            "s.CATEGORY_ID AS sub_category_parent_id, "
+            "s.SUB_CATEGORY_NAME AS sub_category_name, "
+            "s.BUDGET AS sub_category_budget "
+            "FROM Category c "
+            "LEFT JOIN SubCategory s ON s.CATEGORY_ID = c.ID "
+            "WHERE c.CATEGORY_TYPE = 1 "
+            "ORDER BY c.CATEGORY_NAME ASC, s.SUB_CATEGORY_NAME ASC";
+
+        print('Executing for expense SQL: $sql');
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+        final results = await service.executeReadQuery(sql);
+
+        final rows = (results['rows'] as List? ?? []);
+        final categoriesById = <String, Category>{};
+
+        for (final row in rows) 
+        {
+            final rowMap = Map<String, dynamic>.from(row as Map);
+            final categoryId = rowMap['category_id']?.toString() ?? '';
+            if (categoryId.isEmpty) 
+            {
+                continue;
+            }
+
+            final existing = categoriesById[categoryId];
+            final categoryName = rowMap['category_name']?.toString() ?? '';
+            final categoryBudget = _toDouble(rowMap['category_budget']);
+            final categoryTypeValue = int.tryParse(rowMap['category_type']?.toString() ?? '0') ?? 0;
+            final categoryType = categoryTypeValue == 1 ? 'expense' : '';
+
+            if (existing == null) {
+                categoriesById[categoryId] = Category(
+                    id: categoryId,
+                    name: categoryName,
+                    budget: categoryBudget,
+                    type: categoryType,
+                    subCategories: const [],
+                );
+            }
+
+            final subCategoryId = rowMap['sub_category_id'];
+            if (subCategoryId != null) 
+            {
+                final currentCategory = categoriesById[categoryId]!;
+                final updatedSubCategories = List<SubCategory>.from(currentCategory.subCategories)
+                  ..add(
+                    SubCategory(
+                        id: subCategoryId.toString(),
+                        categoryId: rowMap['sub_category_parent_id']?.toString() ?? categoryId,
+                        name: rowMap['sub_category_name']?.toString() ?? '',
+                        budget: _toDouble(rowMap['sub_category_budget']),
+                    ),
+                  );
+
+                categoriesById[categoryId] = Category(
+                    id: currentCategory.id,
+                    name: currentCategory.name,
+                    budget: currentCategory.budget,
+                    type: currentCategory.type,
+                    subCategories: updatedSubCategories,
+                );
+            }
+        }
+
+        return categoriesById.values.toList();
     }
 
 
