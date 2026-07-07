@@ -276,6 +276,7 @@ class Category {
   final String name;
   final double budget;
   final String type;
+  final double amount;
   final List<SubCategory> subCategories;
 
   Category({
@@ -283,6 +284,7 @@ class Category {
     required this.name,
     this.budget = 0,
     this.type = '',
+    this.amount = 0,
     this.subCategories = const [],
   });
 

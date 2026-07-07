@@ -6,7 +6,9 @@ import '../models/models.dart' show Category;
 import '../utils/currency_formatter.dart';
 
 class ExpensePieChart extends StatefulWidget {
-  const ExpensePieChart({super.key});
+  const ExpensePieChart({super.key, this.categories});
+
+  final List<Category>? categories;
 
   @override
   State<ExpensePieChart> createState() => _ExpensePieChartState();
@@ -56,27 +58,52 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
   Future<void> _loadPieData() async {
     setState(() => _loading = true);
     try {
-      final month = DateFormat('MMM').format(DateTime(_selectedYear, _selectedMonth)).toLowerCase();
-      final year = _selectedYear.toString();
-      final results = await Future.wait([
-        _api.getMonthlyExpenses(month: month, year: year),
-        _api.getMonthlyIncome(month: month, year: year),
-        _api.getMonthlyInvestments(month: month, year: year),
-        _api.getCategories(type: 'expense'),
-      ]);
+      final now = DateTime.now();
+      final isCurrentMonth = _selectedYear == now.year && _selectedMonth == now.month;
+      if (isCurrentMonth && widget.categories != null && widget.categories!.isNotEmpty) {
+        final cats = widget.categories!;
+        _categories = _fromModelCategories(
+            cats.where((c) => c.type == 'expense').toList(), _expenseColors);
+        _incomeCategories = _fromModelCategories(
+            cats.where((c) => c.type == 'income').toList(), _incomeColors);
+        _investmentCategories = _fromModelCategories(
+            cats.where((c) => c.type == 'investment').toList(), _investColors);
+        _budget = cats
+            .where((c) => c.type == 'expense')
+            .fold<double>(0, (sum, c) => sum + c.budget);
+      } else {
+        final month = DateFormat('MMM').format(DateTime(_selectedYear, _selectedMonth)).toLowerCase();
+        final year = _selectedYear.toString();
+        final results = await Future.wait([
+          _api.getMonthlyExpenses(month: month, year: year),
+          _api.getMonthlyIncome(month: month, year: year),
+          _api.getMonthlyInvestments(month: month, year: year),
+          _api.getCategories(type: 'expense'),
+        ]);
 
-      _categories = _parseCategories(results[0], _expenseColors);
-      _incomeCategories = _parseCategories(results[1], _incomeColors);
-      _investmentCategories = _parseCategories(results[2], _investColors);
+        _categories = _parseCategories(results[0], _expenseColors);
+        _incomeCategories = _parseCategories(results[1], _incomeColors);
+        _investmentCategories = _parseCategories(results[2], _investColors);
 
-      _budget = (results[3]['categories'] as List? ?? [])
-          .map((j) => Category.fromJson(j))
-          .where((Category c) => c.type == 'expense')
-          .fold<double>(0, (sum, c) => sum + c.budget);
+        _budget = (results[3]['categories'] as List? ?? [])
+            .map((j) => Category.fromJson(j))
+            .where((Category c) => c.type == 'expense')
+            .fold<double>(0, (sum, c) => sum + c.budget);
+      }
     } catch (_) {
       // Keep empty lists
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  List<_ExpenseCategory> _fromModelCategories(
+      List<Category> cats, List<Color> colors) {
+    final nonZero = cats.where((c) => c.amount > 0).toList();
+    return nonZero.asMap().entries.map((e) => _ExpenseCategory(
+        e.value.name,
+        e.value.amount,
+        colors[e.key % colors.length],
+    )).toList();
   }
 
   List<_ExpenseCategory> _parseCategories(

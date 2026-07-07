@@ -2,7 +2,6 @@ import 'package:finance_app/services/direct_sql_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
 import '../widgets/account_card.dart';
 import '../widgets/expense_pie_chart.dart';
 import '../widgets/monthly_budget.dart';
@@ -23,7 +22,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedNavIndex = 0;
   String? _filterAccount;
-  final _api = ApiService();
 
   // Data state
   bool _loading = true;
@@ -32,13 +30,12 @@ class _HomeScreenState extends State<HomeScreen> {
   List<InvestmentAccount> _investmentAccounts = [];
   // ignore: unused_field
   List<Category> _categories = [];
+  List<Category> _allCategories = [];
   double _totalIncome = 0;
   double _totalExpense = 0;
   double _totalInvestment = 0;
   double _budgetSpent = 0;
   double _budgetTotal = 0;
-  // ignore: unused_field
-  List<MonthlySummary> _yearlySummary = [];
 
   @override
   void initState() {
@@ -59,61 +56,49 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<Map<String, dynamic>> _safeFetch(
-    String label,
-    Future<Map<String, dynamic>> Function() fetcher,
-  ) async {
-    try {
-      return await fetcher();
-    } catch (e) {
-      debugPrint('[HomeScreen] $label failed: $e');
-      return {};
-    }
-  }
-
   Future<void> _loadData() async {
     final now = DateTime.now();
     final month = DateFormat('MMM').format(now).toLowerCase();
     final year = now.year.toString();
 
+    // Load accounts and categories in PARALLEL instead of sequentially
     final accountsFuture = _safeFetchAccounts(month, year);
-    final typesSumFuture = DirectSqlService.getTransactionTypesSum(month, year).catchError((e) {
-      debugPrint('[HomeScreen] getTransactionTypesSum failed: $e');
-      return <String, double>{'total_income': 0, 'total_expense': 0, 'total_investment': 0};
-    });
-
-   final expenseCategoriesFuture = DirectSqlService.getExpenseCategories().catchError((e) 
-   {
+    final expenseCategoriesFuture = DirectSqlService.getExpenseCategories(month, year).catchError((e) {
       debugPrint('[HomeScreen] getExpenseCategories failed: $e');
-    return <Category>[];
+      return (
+        categories: <Category>[],
+        totalIncome: 0.0,
+        totalExpense: 0.0,
+        totalInvestment: 0.0,
+      );
     });
 
-    final results = await Future.wait([
-      _safeFetch('getYearlySummary', () => _api.getYearlySummary(year)),
-    ]);
+    // Wait for both in parallel
+    final results = await Future.wait([accountsFuture, expenseCategoriesFuture]);
+    
+    final accountsData = results[0] as ActiveAccountsResult;
+    final categoriesResult = results[1] as ({
+      List<Category> categories,
+      double totalIncome,
+      double totalExpense,
+      double totalInvestment
+    });
 
-    final accountsData = await accountsFuture;
-    final typeSums = await typesSumFuture;
-    final expenseCategories = await expenseCategoriesFuture;
-    final yearlyData = results[0];
+    final expenseCategories = categoriesResult.categories;
 
     final banks = accountsData.bankAccounts;
     final cards = accountsData.creditCardAccounts;
     final investments = accountsData.investmentAccounts;
 
-    final double income = typeSums['total_income'] ?? 0;
-    final double expense = typeSums['total_expense'] ?? 0;
-    final double investment = typeSums['total_investment'] ?? 0;
+    final double income = categoriesResult.totalIncome;
+    final double expense = categoriesResult.totalExpense;
+    final double investment = categoriesResult.totalInvestment;
 
     final List<Category> cats = (expenseCategories as List<Category>? ?? [])
         .where((c) => c.type == 'expense')
         .toList();
     final totalBudget =
         cats.fold<double>(0, (sum, c) => sum + c.budget);
-
-    final summary = (yearlyData['summaryData'] as List? ?? [])
-        .map((j) => MonthlySummary.fromJson(j))
-        .toList();
 
     if (mounted) {
       setState(() {
@@ -124,9 +109,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _totalExpense = expense;
         _totalInvestment = investment;
         _categories = cats;
+        _allCategories = expenseCategories;
         _budgetSpent = expense;
         _budgetTotal = totalBudget;
-        _yearlySummary = summary;
         _loading = false;
       });
     }
@@ -205,7 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     total: _budgetTotal > 0 ? _budgetTotal : 2500,
                   ),
                   const SizedBox(height: 28),
-                  const ExpensePieChart(),
+                  ExpensePieChart(categories: _allCategories),
                   const SizedBox(height: 28),
                   MoneyFlow(
                     income: _totalIncome,
