@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -23,18 +25,21 @@ class _SplashScreenState extends State<SplashScreen> {
       // Load environment variables (required first)
       await dotenv.load();
 
-      // Run Firebase, Notifications, and Auth in PARALLEL (not sequential)
-      await Future.wait([
-        _initFirebase(),
-        _initNotifications(),
-        _initAuth(),
-      ], eagerError: false);
+      // Start Firebase, Notifications, and Auth in background.
+      unawaited(
+        Future.wait([
+          _initFirebase(),
+          _initNotifications(),
+          _initAuth(),
+        ], eagerError: false).then((_) {
+          NotificationService.instance.processPendingNotifications();
+        }).catchError((Object e, StackTrace st) {
+          debugPrint('Background initialization error: $e');
+        }),
+      );
 
       // Navigate to HomeScreen
       if (mounted) {
-        await Future.microtask(() {
-          NotificationService.instance.processPendingNotifications();
-        });
         Navigator.of(context).pushReplacementNamed('/home');
       }
     } catch (e) {
