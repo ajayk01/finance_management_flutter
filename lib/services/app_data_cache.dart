@@ -28,6 +28,11 @@ class AppDataCache {
   final Map<String, List<TransactionModel>> _transactionsCache = {};
   final Map<String, Map<String, double>> _expenseByCategoryCache = {};
   final Map<String, Map<String, double>> _incomeByCategoryCache = {};
+  final Map<String, Map<String, double>> _monthlyExpenseByCategoryCache = {};
+  final Map<String, Map<String, double>> _monthlyIncomeByCategoryCache = {};
+  final Map<String, double> _totalIncomeCache = {};
+  final Map<String, double> _totalExpenseCache = {};
+  final Map<String, double> _totalInvestmentCache = {};
 
   // ─── Getters ──────────────────────────────────────────────
 
@@ -46,6 +51,10 @@ class AppDataCache {
   List<Category> get categories => _categories;
   List<CreditCardCap> get creditCardCaps => _creditCardCaps;
   List<SplitwiseGroup> get splitwiseGroups => _splitwiseGroups;
+  bool get hasAccountsSnapshot =>
+      _bankAccounts.isNotEmpty ||
+      _creditCardAccounts.isNotEmpty ||
+      _investmentAccounts.isNotEmpty;
 
   // ─── Transaction cache getters/setters ────────────────────
 
@@ -76,6 +85,62 @@ class AppDataCache {
     _incomeByCategoryCache[key] = incomeByCategory;
   }
 
+  bool hasMonthlySummaryCache(String month, String year) {
+    final key = _txKey(month, year);
+    return _monthlyExpenseByCategoryCache.containsKey(key) ||
+        _monthlyIncomeByCategoryCache.containsKey(key) ||
+        _totalIncomeCache.containsKey(key) ||
+        _totalExpenseCache.containsKey(key) ||
+        _totalInvestmentCache.containsKey(key);
+  }
+
+  Map<String, double>? getCachedMonthlyExpenseByCategory(
+    String month,
+    String year,
+  ) =>
+      _monthlyExpenseByCategoryCache[_txKey(month, year)];
+
+  Map<String, double>? getCachedMonthlyIncomeByCategory(
+    String month,
+    String year,
+  ) =>
+      _monthlyIncomeByCategoryCache[_txKey(month, year)];
+
+  double? getCachedTotalIncome(String month, String year) =>
+      _totalIncomeCache[_txKey(month, year)];
+
+  double? getCachedTotalExpense(String month, String year) =>
+      _totalExpenseCache[_txKey(month, year)];
+
+  double? getCachedTotalInvestment(String month, String year) =>
+      _totalInvestmentCache[_txKey(month, year)];
+
+  void updateMonthlySummaryCache({
+    required String month,
+    required String year,
+    required Map<String, double> expenseByCategory,
+    required Map<String, double> incomeByCategory,
+    required double totalIncome,
+    required double totalExpense,
+    required double totalInvestment,
+  }) {
+    final key = _txKey(month, year);
+    _monthlyExpenseByCategoryCache[key] = Map.of(expenseByCategory);
+    _monthlyIncomeByCategoryCache[key] = Map.of(incomeByCategory);
+    _totalIncomeCache[key] = totalIncome;
+    _totalExpenseCache[key] = totalExpense;
+    _totalInvestmentCache[key] = totalInvestment;
+  }
+
+  void invalidateMonthlySummaryCache(String month, String year) {
+    final key = _txKey(month, year);
+    _monthlyExpenseByCategoryCache.remove(key);
+    _monthlyIncomeByCategoryCache.remove(key);
+    _totalIncomeCache.remove(key);
+    _totalExpenseCache.remove(key);
+    _totalInvestmentCache.remove(key);
+  }
+
   void removeTransaction(String month, String year, String txId) {
     final key = _txKey(month, year);
     _transactionsCache[key]?.removeWhere((t) => t.id == txId);
@@ -86,12 +151,29 @@ class AppDataCache {
     _transactionsCache.remove(key);
     _expenseByCategoryCache.remove(key);
     _incomeByCategoryCache.remove(key);
+    invalidateMonthlySummaryCache(month, year);
   }
 
   void invalidateAllTransactionCaches() {
     _transactionsCache.clear();
     _expenseByCategoryCache.clear();
     _incomeByCategoryCache.clear();
+    _monthlyExpenseByCategoryCache.clear();
+    _monthlyIncomeByCategoryCache.clear();
+    _totalIncomeCache.clear();
+    _totalExpenseCache.clear();
+    _totalInvestmentCache.clear();
+  }
+
+  void updateAccountsFromModels({
+    required List<BankAccount> bankAccounts,
+    required List<CreditCardAccount> creditCardAccounts,
+    required List<InvestmentAccount> investmentAccounts,
+  }) {
+    _bankAccounts = List.of(bankAccounts);
+    _creditCardAccounts = List.of(creditCardAccounts);
+    _investmentAccounts = List.of(investmentAccounts);
+    _accountsLoaded = true;
   }
 
   // ─── Load from cache (SharedPreferences) ──────────────────
@@ -104,10 +186,10 @@ class AppDataCache {
       _api.getCachedSplitwiseGroups(),
     ]);
 
-    final accountsData = results[0] as Map<String, dynamic>?;
-    final catData = results[1] as Map<String, dynamic>?;
-    final capsData = results[2] as Map<String, dynamic>?;
-    final groupsData = results[3] as Map<String, dynamic>?;
+    final accountsData = results[0];
+    final catData = results[1];
+    final capsData = results[2];
+    final groupsData = results[3];
 
     if (accountsData != null) _parseAccounts(accountsData);
     if (catData != null) _parseCategories(catData);
@@ -276,5 +358,10 @@ class AppDataCache {
     _transactionsCache.clear();
     _expenseByCategoryCache.clear();
     _incomeByCategoryCache.clear();
+    _monthlyExpenseByCategoryCache.clear();
+    _monthlyIncomeByCategoryCache.clear();
+    _totalIncomeCache.clear();
+    _totalExpenseCache.clear();
+    _totalInvestmentCache.clear();
   }
 }

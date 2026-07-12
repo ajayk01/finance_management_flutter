@@ -112,6 +112,20 @@ class DirectSqlService
         return (fromTimestamp: fromTimestamp, toTimestamp: toTimestamp);
     }
 
+    static String _mapTransactionType(dynamic value) {
+        final typeValue = int.tryParse(value?.toString() ?? '') ?? 0;
+        switch (typeValue) {
+            case 1:
+                return 'expense';
+            case 2:
+                return 'income';
+            case 3:
+                return 'investment';
+            default:
+                return 'transfer';
+        }
+    }
+
     static Future<ActiveAccountsResult> getAllActiveAccounts() async
     {
         String sql = "SELECT ID,ACCOUNT_NAME,CURRENT_BALANCE, INITIAL_BALANCE, ACCOUNT_TYPE, IMG FROM Accounts WHERE IS_ACTIVE = 1";
@@ -173,6 +187,126 @@ class DirectSqlService
             creditCardAccounts: creditCardAccounts,
             investmentAccounts: investmentAccounts,
         );
+    }
+
+    static Future<List<TransactionModel>> getAllTransactions(String month, String year) async
+    {
+        final range = _getMonthRangeTimestamps(month, year);
+        final fromTimestamp = range.fromTimestamp;
+        final toTimestamp = range.toTimestamp;
+
+        final sql = "SELECT "
+            "t.ID AS id, "
+            "t.DATE AS date, "
+            "t.DESCRIPTION AS description, "
+            "t.AMOUNT AS amount, "
+            "t.TRANSCATION_TYPE AS transaction_type, "
+            "t.CATEGORY_ID AS category_id, "
+            "t.SUB_CATEGORY_ID AS sub_category_id, "
+            "t.FROM_ACCOUNT_ID AS from_account_id, "
+            "t.TO_ACCOUNT_ID AS to_account_id, "
+            "c.CATEGORY_NAME AS category_name, "
+            "s.SUB_CATEGORY_NAME AS sub_category_name, "
+            "fa.ACCOUNT_NAME AS from_account_name, "
+            "ta.ACCOUNT_NAME AS to_account_name "
+            "FROM Transactions t "
+            "LEFT JOIN Category c ON c.ID = t.CATEGORY_ID "
+            "LEFT JOIN SubCategory s ON s.ID = t.SUB_CATEGORY_ID "
+            "LEFT JOIN Accounts fa ON fa.ID = t.FROM_ACCOUNT_ID "
+            "LEFT JOIN Accounts ta ON ta.ID = t.TO_ACCOUNT_ID "
+            "WHERE t.DATE >= $fromTimestamp AND t.DATE <= $toTimestamp "
+            "ORDER BY t.DATE DESC, t.ID DESC";
+
+        debugPrint('getAllTransactions SQL:\n$sql', wrapWidth: 1024);
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+        final results = await service.executeReadQuery(sql);
+
+        final rows = (results['rows'] as List? ?? []);
+        final transactionIds = rows
+            .map((row) => Map<String, dynamic>.from(row as Map)['id']?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>()
+            .toList();
+
+        final splitwiseByTransaction = <String, List<Map<String, dynamic>>>{};
+        if (transactionIds.isNotEmpty) {
+            final inClause = transactionIds.join(',');
+            final splitwiseSql = "SELECT "
+                "st.TRANSACTION_ID AS transaction_id, "
+                "st.SPLITWISE_TRANSACTION_ID AS splitwise_transaction_id, "
+                "st.SPLITED_AMOUNT AS splited_amount, "
+                "sf.ID AS db_friend_id, "
+                "sf.SPLITWISE_FRIEND_ID AS splitwise_friend_id, "
+                "sf.NAME AS friend_name "
+                "FROM SplitwiseTransactions st "
+                "JOIN SplitwiseFriends sf ON sf.ID = st.FRIEND_ID "
+                "WHERE st.TRANSACTION_ID IN ($inClause) "
+                "ORDER BY st.TRANSACTION_ID, sf.NAME";
+            debugPrint('getAllTransactions splitwise SQL:\n$splitwiseSql', wrapWidth: 1024);
+            final splitwiseResults = await service.executeReadQuery(splitwiseSql);
+            final splitwiseRows = (splitwiseResults['rows'] as List? ?? []);
+            for (final splitwiseRow in splitwiseRows) {
+                final splitwiseMap = Map<String, dynamic>.from(splitwiseRow as Map);
+                final transactionId = splitwiseMap['transaction_id']?.toString();
+                if (transactionId == null || transactionId.isEmpty) {
+                    continue;
+                }
+                final splitwiseFriendId = splitwiseMap['splitwise_friend_id']?.toString();
+                final dbFriendId = splitwiseMap['db_friend_id']?.toString();
+                splitwiseByTransaction.putIfAbsent(transactionId, () => []).add({
+                    'splitwiseTransactionId': splitwiseMap['splitwise_transaction_id']?.toString() ?? '',
+                    'friendId': splitwiseFriendId ?? dbFriendId ?? '',
+                    'userId': splitwiseFriendId ?? dbFriendId ?? '',
+                    'splitwiseUserId': splitwiseFriendId ?? dbFriendId ?? '',
+                    'friendName': splitwiseMap['friend_name']?.toString() ?? '',
+                    'splitedAmount': _toDouble(splitwiseMap['splited_amount']),
+                });
+            }
+        }
+
+        return rows.map((row) {
+            final rowMap = Map<String, dynamic>.from(row as Map);
+            final transactionId = rowMap['id']?.toString() ?? '';
+            final type = _mapTransactionType(rowMap['transaction_type']);
+            final isTransfer = type == 'transfer';
+            final isInvestment = type == 'investment';
+            final splitwiseDetails = splitwiseByTransaction[transactionId] ?? const <Map<String, dynamic>>[];
+            final splitwiseUserIds = splitwiseDetails
+                .map((detail) => (detail['splitwiseUserId'] ?? detail['friendId'])?.toString())
+                .where((id) => id != null && id.isNotEmpty)
+                .cast<String>()
+                .toList();
+
+            return TransactionModel.fromJson({
+                'id': rowMap['id'],
+                'date': rowMap['date'],
+                'description': rowMap['description'] ?? '',
+                'amount': rowMap['amount'],
+                'type': type,
+                'category': isTransfer
+                    ? 'Transfer'
+                    : (rowMap['category_name']?.toString() ?? (isInvestment ? 'Investment' : null)),
+                'subCategory': isTransfer ? rowMap['to_account_name'] : rowMap['sub_category_name'],
+                'accountId': rowMap['from_account_id']?.toString(),
+                'accountName': rowMap['from_account_name'],
+                'categoryId': rowMap['category_id']?.toString(),
+                'subCategoryId': rowMap['sub_category_id']?.toString(),
+                'investmentAccountId': isInvestment ? rowMap['to_account_id']?.toString() : null,
+                'investmentAccountName': isInvestment ? rowMap['to_account_name'] : null,
+                'splitwiseDetails': splitwiseDetails.map((detail) => {
+                    ...detail,
+                    'date': rowMap['date'],
+                    'description': rowMap['description'] ?? '',
+                    'totalAmount': _toDouble(rowMap['amount']),
+                    'categoryId': rowMap['category_id']?.toString(),
+                    'subCategoryId': rowMap['sub_category_id']?.toString(),
+                }).toList(),
+                'splitwiseUserIds': splitwiseUserIds,
+                'includeSplitwise': splitwiseDetails.isNotEmpty,
+            });
+        }).toList();
     }
 
     static Future<Map<String, double>> getTransactionTypesSum(String month, String year) async 

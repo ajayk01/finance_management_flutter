@@ -7,6 +7,7 @@ import '../widgets/expense_pie_chart.dart';
 import '../widgets/monthly_budget.dart';
 import '../widgets/money_flow.dart';
 import '../widgets/bottom_nav_bar.dart';
+import '../services/app_data_cache.dart';
 import 'investment_screen.dart';
 import 'profile_screen.dart';
 import 'transaction_screen.dart';
@@ -99,6 +100,34 @@ class _HomeScreenState extends State<HomeScreen> {
         .toList();
     final totalBudget =
         cats.fold<double>(0, (sum, c) => sum + c.budget);
+
+    final expenseByCategory = <String, double>{};
+    final incomeByCategory = <String, double>{};
+    for (final c in expenseCategories) {
+      final amount = c.amount;
+      if (amount <= 0) continue;
+      if (c.type == 'expense') {
+        expenseByCategory[c.name] = (expenseByCategory[c.name] ?? 0) + amount;
+      } else if (c.type == 'income') {
+        incomeByCategory[c.name] = (incomeByCategory[c.name] ?? 0) + amount;
+      }
+    }
+
+    final cache = AppDataCache();
+    cache.updateAccountsFromModels(
+      bankAccounts: banks,
+      creditCardAccounts: cards,
+      investmentAccounts: investments,
+    );
+    cache.updateMonthlySummaryCache(
+      month: month,
+      year: year,
+      expenseByCategory: expenseByCategory,
+      incomeByCategory: incomeByCategory,
+      totalIncome: income,
+      totalExpense: expense,
+      totalInvestment: investment,
+    );
 
     if (mounted) {
       setState(() {

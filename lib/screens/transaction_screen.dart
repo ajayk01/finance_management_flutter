@@ -3,6 +3,7 @@ import 'package:intl/intl.dart' hide TextDirection;
 import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/app_data_cache.dart';
+import '../services/direct_sql_service.dart';
 import '../utils/currency_formatter.dart';
 import '../widgets/overview_bar_chart.dart';
 import 'add_transaction_screen.dart';
@@ -111,27 +112,51 @@ class _TransactionScreenState extends State<TransactionScreen> {
     _loadTransactions();
   }
 
-  static double _parseAmount(String s) {
-    return double.tryParse(s.replaceAll(RegExp(r'[^0-9.\-]'), '')) ?? 0;
-  }
-
   Future<void> _loadTransactions() async {
     final month = DateFormat('MMM').format(_currentDate).toLowerCase();
     final year = _currentDate.year.toString();
     final cache = AppDataCache();
 
+    final cachedMonthlyExp =
+      cache.getCachedMonthlyExpenseByCategory(month, year) ?? {};
+    final cachedMonthlyInc =
+      cache.getCachedMonthlyIncomeByCategory(month, year) ?? {};
+    final cachedTotalIncome = cache.getCachedTotalIncome(month, year) ?? 0;
+    final cachedTotalExpense = cache.getCachedTotalExpense(month, year) ?? 0;
+    final cachedTotalInvestment =
+      cache.getCachedTotalInvestment(month, year) ?? 0;
+
     // Show cached data immediately as placeholder (non-blocking)
     if (cache.hasTransactionCache(month, year)) {
       final cachedTx = cache.getCachedTransactions(month, year)!;
-      final cachedExp = cache.getCachedExpenseByCategory(month, year) ?? {};
-      final cachedInc = cache.getCachedIncomeByCategory(month, year) ?? {};
+      final cachedExp = cachedMonthlyExp.isNotEmpty
+          ? cachedMonthlyExp
+          : (cache.getCachedExpenseByCategory(month, year) ?? {});
+      final cachedInc = cachedMonthlyInc.isNotEmpty
+          ? cachedMonthlyInc
+          : (cache.getCachedIncomeByCategory(month, year) ?? {});
       setState(() {
         _transactions = cachedTx;
         _bankAccounts = cache.bankAccounts;
         _creditCardAccounts = cache.creditCardAccounts;
         _apiExpenseByCategory = cachedExp;
         _apiIncomeByCategory = cachedInc;
+        _totalIncome = cachedTotalIncome;
+        _totalExpense = cachedTotalExpense;
+        _totalInvestment = cachedTotalInvestment;
         _loading = false;
+      });
+    } else if (cache.hasAccountsSnapshot || cache.hasMonthlySummaryCache(month, year)) {
+      // Show available summary/account cache while transactions are loading.
+      setState(() {
+        _bankAccounts = cache.bankAccounts;
+        _creditCardAccounts = cache.creditCardAccounts;
+        _apiExpenseByCategory = cachedMonthlyExp;
+        _apiIncomeByCategory = cachedMonthlyInc;
+        _totalIncome = cachedTotalIncome;
+        _totalExpense = cachedTotalExpense;
+        _totalInvestment = cachedTotalInvestment;
+        _loading = true;
       });
     } else {
       setState(() => _loading = true);
@@ -143,57 +168,93 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
   Future<void> _fetchAndUpdateTransactions(String month, String year, AppDataCache cache) async {
     try {
-      final results = await Future.wait([
-        _api.getAllTransactions(month: month, year: year),
-        _api.getAccounts(),
-        _api.getMonthlyExpenses(month: month, year: year),
-        _api.getMonthlyIncome(month: month, year: year),
-        _api.getMonthlyInvestments(month: month, year: year),
-      ]);
+      final shouldFetchAccounts = !cache.hasAccountsSnapshot;
+      final shouldFetchMonthly = !cache.hasMonthlySummaryCache(month, year);
 
-      final txData = results[0];
-      final accountsData = results[1];
-      final expData = results[2];
-      final incData = results[3];
-      final invData = results[4];
+      final requests = <Future<dynamic>>[
+        DirectSqlService.getAllTransactions(month, year),
+      ];
+      if (shouldFetchAccounts) {
+        requests.add(_api.getAccounts());
+      }
+      if (shouldFetchMonthly) {
+        requests.add(DirectSqlService.getExpenseCategories(month, year));
+      }
 
-      final txList = (txData['transactions'] as List? ?? [])
-          .map((j) => TransactionModel.fromJson(j))
-          .toList();
+      final results = await Future.wait(requests);
+
+      var resultIdx = 0;
+  final txList = results[resultIdx++] as List<TransactionModel>;
+      Map<String, dynamic>? accountsData;
+      ({
+        List<Category> categories,
+        double totalIncome,
+        double totalExpense,
+        double totalInvestment
+      })? monthlyData;
+
+      if (shouldFetchAccounts) {
+        accountsData = results[resultIdx++] as Map<String, dynamic>;
+      }
+      if (shouldFetchMonthly) {
+        monthlyData = results[resultIdx++] as ({
+          List<Category> categories,
+          double totalIncome,
+          double totalExpense,
+          double totalInvestment
+        });
+      }
 
       // Update cache with fresh accounts
-      if (accountsData.isNotEmpty) cache.updateAccounts(accountsData);
+      if (accountsData != null && accountsData.isNotEmpty) {
+        cache.updateAccounts(accountsData);
+      }
       final banks = cache.bankAccounts;
       final cards = cache.creditCardAccounts;
 
-      // Parse monthly expenses by category
-      final expByCat = <String, double>{};
-      for (final item in (expData['monthlyExpenses'] as List? ?? [])) {
-        final cat = item['category'] ?? 'Others';
-        final amt = _parseAmount(item['expense']?.toString() ?? '0');
-        expByCat[cat] = (expByCat[cat] ?? 0) + amt;
-      }
+      Map<String, double> expByCat;
+      Map<String, double> incByCat;
+      double totalIncome;
+      double totalExpense;
+      double totalInvestment;
 
-      // Parse monthly income by category
-      final incByCat = <String, double>{};
-      for (final item in (incData['monthlyIncome'] as List? ?? [])) {
-        final cat = item['category'] ?? 'Others';
-        final amt = _parseAmount(item['expense']?.toString() ?? '0');
-        incByCat[cat] = (incByCat[cat] ?? 0) + amt;
-      }
+      if (shouldFetchMonthly) {
+        expByCat = <String, double>{};
+        incByCat = <String, double>{};
+        for (final category in monthlyData?.categories ?? const <Category>[]) {
+          if (category.amount <= 0) continue;
+          if (category.type == 'expense') {
+            expByCat[category.name] =
+                (expByCat[category.name] ?? 0) + category.amount;
+          } else if (category.type == 'income') {
+            incByCat[category.name] =
+                (incByCat[category.name] ?? 0) + category.amount;
+          }
+        }
 
-      // Compute totals for overview
-      double totalIncome = 0;
-      for (final item in (incData['monthlyIncome'] as List? ?? [])) {
-        totalIncome += _parseAmount(item['expense']?.toString() ?? '0');
-      }
-      double totalExpense = 0;
-      for (final item in (expData['monthlyExpenses'] as List? ?? [])) {
-        totalExpense += _parseAmount(item['expense']?.toString() ?? '0');
-      }
-      double totalInvestment = 0;
-      for (final item in (invData['monthlyInvestments'] as List? ?? [])) {
-        totalInvestment += _parseAmount(item['expense']?.toString() ?? '0');
+        totalIncome = monthlyData?.totalIncome ?? 0;
+        totalExpense = monthlyData?.totalExpense ?? 0;
+        totalInvestment = monthlyData?.totalInvestment ?? 0;
+
+        cache.updateMonthlySummaryCache(
+          month: month,
+          year: year,
+          expenseByCategory: expByCat,
+          incomeByCategory: incByCat,
+          totalIncome: totalIncome,
+          totalExpense: totalExpense,
+          totalInvestment: totalInvestment,
+        );
+      } else {
+        expByCat = Map.of(cache.getCachedMonthlyExpenseByCategory(month, year) ??
+            cache.getCachedExpenseByCategory(month, year) ??
+            {});
+        incByCat = Map.of(cache.getCachedMonthlyIncomeByCategory(month, year) ??
+            cache.getCachedIncomeByCategory(month, year) ??
+            {});
+        totalIncome = cache.getCachedTotalIncome(month, year) ?? 0;
+        totalExpense = cache.getCachedTotalExpense(month, year) ?? 0;
+        totalInvestment = cache.getCachedTotalInvestment(month, year) ?? 0;
       }
 
       // Store in cache
