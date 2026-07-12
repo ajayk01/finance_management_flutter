@@ -25,22 +25,18 @@ class _SplashScreenState extends State<SplashScreen> {
       // Load environment variables (required first)
       await dotenv.load();
 
-      // Start Firebase, Notifications, and Auth in background.
-      unawaited(
-        Future.wait([
-          _initFirebase(),
-          _initNotifications(),
-          _initAuth(),
-        ], eagerError: false).then((_) {
-          NotificationService.instance.processPendingNotifications();
-        }).catchError((Object e, StackTrace st) {
-          debugPrint('Background initialization error: $e');
-        }),
-      );
+      await _initFirebase();
+      await _initNotifications();
+
+      // Keep auth non-blocking so splash does not wait on session/network work.
+      unawaited(_initAuth());
 
       // Navigate to HomeScreen
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/home');
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          NotificationService.instance.markNavigationReady();
+        });
       }
     } catch (e) {
       debugPrint('Initialization error: $e');
