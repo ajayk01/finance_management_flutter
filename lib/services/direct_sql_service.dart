@@ -120,9 +120,11 @@ class DirectSqlService
             case 2:
                 return 'income';
             case 3:
+                return 'transfer';
+            case 4:
                 return 'investment';
             default:
-                return 'transfer';
+                return 'unknown';
         }
     }
 
@@ -198,7 +200,7 @@ class DirectSqlService
         final sql = "SELECT "
             "t.ID AS id, "
             "t.DATE AS date, "
-            "t.DESCRIPTION AS description, "
+            "t.NOTES AS description, "
             "t.AMOUNT AS amount, "
             "t.TRANSCATION_TYPE AS transaction_type, "
             "t.CATEGORY_ID AS category_id, "
