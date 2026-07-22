@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
 import '../services/app_data_cache.dart';
 import '../utils/currency_formatter.dart';
 
@@ -12,7 +11,6 @@ class InvestmentScreen extends StatefulWidget {
 }
 
 class _InvestmentScreenState extends State<InvestmentScreen> {
-  final _api = ApiService();
   bool _loading = true;
   List<InvestmentAccount> _accounts = [];
 
