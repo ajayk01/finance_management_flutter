@@ -61,7 +61,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   void initState() {
     super.initState();
     _loadCachedFormData();
-    _loadFormData();
+    //_loadFormData();
     _applyPrefill();
   }
 

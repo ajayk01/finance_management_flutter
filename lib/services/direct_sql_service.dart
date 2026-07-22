@@ -485,7 +485,207 @@ class DirectSqlService
         );
     }
 
+    /// Fetch all categories and subcategories from MySQL database
+    /// Returns List of categories with nested subcategories populated
+    static Future<List<Category>> getAllCategoriesAndSubCategories({
+        String type = 'all', // 'all', 'expense', 'income', 'investment'
+    }) async {
+        String sql = '''
+            SELECT 
+                c.ID as category_id,
+                c.CATEGORY_NAME as category_name,
+                c.BUDGET as category_budget,
+                c.CATEGORY_TYPE as category_type,
+                s.ID as sub_category_id,
+                s.SUB_CATEGORY_NAME as sub_category_name,
+                s.BUDGET as sub_category_budget,
+                s.CATEGORY_ID as sub_category_parent_id
+            FROM Category c
+            LEFT JOIN SubCategory s ON s.CATEGORY_ID = c.ID
+            WHERE 1=1
+        ''';
 
+        // Filter by type if specified
+        if (type != 'all') {
+            int typeValue = 0;
+            switch (type.toLowerCase()) {
+                case 'expense':
+                    typeValue = 1;
+                    break;
+                case 'income':
+                    typeValue = 2;
+                    break;
+                case 'investment':
+                    typeValue = 3;
+                    break;
+            }
+            if (typeValue > 0) {
+                sql += ' AND c.CATEGORY_TYPE = $typeValue';
+            }
+        }
 
+        sql += ' ORDER BY c.CATEGORY_NAME, s.SUB_CATEGORY_NAME';
+
+        try {
+            MySqlConfig config = MySqlConfig.fromDotEnv();
+            MySqlService service = MySqlService();
+            await service.connect(config);
+            
+            final results = await service.executeReadQuery(sql);
+            final rows = results['rows'] as List? ?? [];
+
+            if (rows.isEmpty) {
+                debugPrint('[DirectSqlService] No categories found in database');
+                return <Category>[];
+            }
+
+            // Map to store categories by ID
+            final Map<String, Category> categoriesById = {};
+
+            for (final row in rows) {
+                final rowMap = Map<String, dynamic>.from(row as Map);
+                
+                final categoryId = rowMap['category_id']?.toString() ?? '';
+                final categoryName = rowMap['category_name']?.toString() ?? '';
+                final categoryBudget = _toDouble(rowMap['category_budget']);
+                final categoryTypeValue = int.tryParse(rowMap['category_type']?.toString() ?? '0') ?? 0;
+                final categoryType = categoryTypeValue == 1 
+                    ? 'expense' 
+                    : categoryTypeValue == 2 
+                        ? 'income' 
+                        : 'investment';
+
+                // Create or get category
+                if (!categoriesById.containsKey(categoryId)) {
+                    categoriesById[categoryId] = Category(
+                        id: categoryId,
+                        name: categoryName,
+                        budget: categoryBudget,
+                        type: categoryType,
+                        amount: 0,
+                        subCategories: [],
+                    );
+                }
+
+                // Process subcategory if it exists
+                final subCategoryId = rowMap['sub_category_id'];
+                if (subCategoryId != null && subCategoryId.toString().isNotEmpty) {
+                    final subCategoryName = rowMap['sub_category_name']?.toString() ?? '';
+                    final subCategoryBudget = _toDouble(rowMap['sub_category_budget']);
+                    final subCategoryParentId = rowMap['sub_category_parent_id']?.toString() ?? categoryId;
+
+                    final subCategory = SubCategory(
+                        id: subCategoryId.toString(),
+                        categoryId: subCategoryParentId,
+                        name: subCategoryName,
+                        budget: subCategoryBudget,
+                    );
+
+                    // Add subcategory to its parent category
+                    final currentCategory = categoriesById[categoryId]!;
+                    final updatedSubCategories = List<SubCategory>.from(currentCategory.subCategories)
+                        ..add(subCategory);
+
+                    categoriesById[categoryId] = Category(
+                        id: currentCategory.id,
+                        name: currentCategory.name,
+                        budget: currentCategory.budget,
+                        type: currentCategory.type,
+                        amount: currentCategory.amount,
+                        subCategories: updatedSubCategories,
+                    );
+                }
+            }
+
+            final categories = categoriesById.values.toList();
+            
+            debugPrint('[DirectSqlService] Fetched ${categories.length} categories with nested subcategories');
+            
+            return categories;
+
+        } catch (e) {
+            debugPrint('[DirectSqlService] Error fetching categories: $e');
+            return <Category>[];
+        }
+    }
+
+    /// Fetch all credit card caps from MySQL database
+    /// Returns List of CreditCardCap objects
+    static Future<List<CreditCardCap>> getAllCreditCardCaps({
+        String? creditCardId,
+    }) async {
+        String sql = '''
+            SELECT 
+                cccd.ID as id,
+                cccd.CREDIT_CARD_ID as credit_card_id,
+                cccd.CAP_NAME as cap_name,
+                cccd.CAP_TOTAL_AMOUNT as cap_total_amount,
+                cccd.CAP_PERCENTAGE as cap_percentage,
+                cccd.CAP_CURRENT_AMOUNT as cap_current_amount,
+                cccd.REWARD_PER_AMOUNT as reward_per_amount
+            FROM CreditCardCapDetails cccd
+            WHERE 1=1
+        ''';
+
+        // Filter by specific credit card if provided
+        if (creditCardId != null && creditCardId.isNotEmpty) {
+            sql += ' AND cccd.CREDIT_CARD_ID = ${int.tryParse(creditCardId) ?? 0}';
+        }
+
+        sql += ' ORDER BY cccd.CAP_NAME ASC';
+
+        try {
+            MySqlConfig config = MySqlConfig.fromDotEnv();
+            MySqlService service = MySqlService();
+            await service.connect(config);
+            
+            final results = await service.executeReadQuery(sql);
+            final rows = results['rows'] as List? ?? [];
+
+            if (rows.isEmpty) {
+                debugPrint('[DirectSqlService] No credit card caps found in database');
+                return <CreditCardCap>[];
+            }
+
+            final creditCardCaps = <CreditCardCap>[];
+
+            for (final row in rows) {
+                final rowMap = Map<String, dynamic>.from(row as Map);
+                
+                final id = rowMap['id']?.toString() ?? '';
+                final creditCardIdValue = rowMap['credit_card_id']?.toString() ?? '';
+                final capName = rowMap['cap_name']?.toString() ?? '';
+                final capTotalAmount = _toDouble(rowMap['cap_total_amount']);
+                final capPercentage = _toDouble(rowMap['cap_percentage']);
+                final capCurrentAmount = _toDouble(rowMap['cap_current_amount']);
+                final rewardPerAmount = _toDouble(rowMap['reward_per_amount']);
+                
+                // Calculate remaining amount
+                final remainingAmount = capTotalAmount - capCurrentAmount;
+
+                creditCardCaps.add(
+                    CreditCardCap(
+                        id: id,
+                        creditCardId: creditCardIdValue,
+                        capName: capName,
+                        capTotalAmount: capTotalAmount,
+                        capPercentage: capPercentage,
+                        capCurrentAmount: capCurrentAmount,
+                        remainingAmount: remainingAmount,
+                        totalRewards: 0,
+                        rewardPerAmount: rewardPerAmount > 0 ? rewardPerAmount : 100,
+                    ),
+                );
+            }
+
+            debugPrint('[DirectSqlService] Fetched ${creditCardCaps.length} credit card caps');
+            
+            return creditCardCaps;
+
+        } catch (e) {
+            debugPrint('[DirectSqlService] Error fetching credit card caps: $e');
+            return <CreditCardCap>[];
+        }
+    }
 
 }

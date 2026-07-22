@@ -1,7 +1,7 @@
 import 'package:finance_app/services/direct_sql_service.dart';
 import 'package:flutter/foundation.dart' hide Category;
 import '../models/models.dart';
-import 'api_service.dart';
+import 'splitwise_route_service.dart';
 
 /// Centralized in-memory cache for shared data (accounts, categories, etc.).
 /// Singleton — use `AppDataCache()` to access.
@@ -10,8 +10,7 @@ class AppDataCache {
   factory AppDataCache() => _instance;
   AppDataCache._internal();
 
-  // Lazy getter avoids circular singleton initialization with ApiService
-  ApiService get _api => ApiService();
+  SplitwiseRouteService get _splitwiseRouteService => SplitwiseRouteService();
 
   // ─── Cached data ──────────────────────────────────────────
   List<BankAccount> _bankAccounts = [];
@@ -180,7 +179,15 @@ class AppDataCache {
 
   // ─── Load from cache (SharedPreferences) ──────────────────
 
-  Future<void> loadFromLocal() => refreshAll();
+  Future<void> loadFromLocal() async {
+    // Only fetch data that hasn't been loaded yet
+    await Future.wait([
+      if (!_accountsLoaded) refreshAccounts(),
+      if (!_categoriesLoaded) refreshCategories(),
+      if (!_capsLoaded) refreshCaps(),
+      if (!_groupsLoaded) refreshGroups(),
+    ]);
+  }
 
   // ─── Fetch fresh from API ─────────────────────────────────
 
@@ -199,8 +206,11 @@ class AppDataCache {
 
   Future<void> refreshCategories() async {
     try {
-      final data = await _api.getCategories();
-      _parseCategories(data);
+      final categories = await DirectSqlService.getAllCategoriesAndSubCategories(
+        type: 'all',
+      );
+      _categories = categories;
+      _categoriesLoaded = true;
     } catch (e) {
       debugPrint('[AppDataCache] refreshCategories failed: $e');
     }
@@ -208,8 +218,9 @@ class AppDataCache {
 
   Future<void> refreshCaps() async {
     try {
-      final data = await _api.getCreditCardCaps();
-      _parseCaps(data);
+      final creditCardCaps = await DirectSqlService.getAllCreditCardCaps();
+      _creditCardCaps = creditCardCaps;
+      _capsLoaded = true;
     } catch (e) {
       debugPrint('[AppDataCache] refreshCaps failed: $e');
     }
@@ -217,8 +228,9 @@ class AppDataCache {
 
   Future<void> refreshGroups() async {
     try {
-      final data = await _api.getSplitwiseGroups();
-      _parseGroups(data);
+      final groups = await _splitwiseRouteService.getGroupsWithMembers();
+      _splitwiseGroups = groups;
+      _groupsLoaded = true;
     } catch (e) {
       debugPrint('[AppDataCache] refreshGroups failed: $e');
     }
