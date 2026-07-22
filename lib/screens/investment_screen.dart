@@ -24,18 +24,22 @@ class _InvestmentScreenState extends State<InvestmentScreen> {
 
   Future<void> _loadData() async {
     setState(() => _loading = true);
+    final cache = AppDataCache();
+
     try {
-      final cache = AppDataCache();
-      final data = await _api.getAccounts();
-      if (data.isNotEmpty) cache.updateAccounts(data);
-      final accounts = cache.activeInvestmentAccounts;
-      if (mounted) {
-        setState(() {
-          _accounts = accounts;
+      await cache.ensureAccounts();
+      final cachedAccounts = cache.activeInvestmentAccounts;
+      if (mounted && cachedAccounts.isNotEmpty) 
+      {
+        setState(() 
+        {
+          _accounts = cachedAccounts;
           _loading = false;
         });
       }
-    } catch (e) {
+    } 
+    catch (e)
+    {
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -185,9 +189,9 @@ class _InvestmentScreenState extends State<InvestmentScreen> {
             Container(
               color: const Color(0xFFF8FAFC),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Row(
+              child: const Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     flex: 3,
                     child: Text(
                       'Account',
@@ -198,7 +202,7 @@ class _InvestmentScreenState extends State<InvestmentScreen> {
                       ),
                     ),
                   ),
-                  const Expanded(
+                  Expanded(
                     flex: 3,
                     child: Text(
                       'Amount',
@@ -210,7 +214,7 @@ class _InvestmentScreenState extends State<InvestmentScreen> {
                       ),
                     ),
                   ),
-                  const Expanded(
+                  Expanded(
                     flex: 2,
                     child: Text(
                       'XIRR',

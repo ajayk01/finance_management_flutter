@@ -174,8 +174,8 @@ class DirectSqlService
                     InvestmentAccount.fromJson({
                         'id': rowMap['ID'],
                         'name': rowMap['ACCOUNT_NAME'],
-                        'totalInvested': rowMap['INITIAL_BALANCE'],
-                        'currentValue': rowMap['CURRENT_BALANCE'],
+                        'totalInvested': rowMap['CURRENT_BALANCE'],
+                        'currentValue': 0,
                         'totalWithdraw': 0,
                         'xirr': 0,
                         'isActive': true,
