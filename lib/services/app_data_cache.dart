@@ -1,3 +1,4 @@
+import 'package:finance_app/services/direct_sql_service.dart';
 import 'package:flutter/foundation.dart' hide Category;
 import '../models/models.dart';
 import 'api_service.dart';
@@ -9,7 +10,8 @@ class AppDataCache {
   factory AppDataCache() => _instance;
   AppDataCache._internal();
 
-  final _api = ApiService();
+  // Lazy getter avoids circular singleton initialization with ApiService
+  ApiService get _api => ApiService();
 
   // ─── Cached data ──────────────────────────────────────────
   List<BankAccount> _bankAccounts = [];
@@ -178,31 +180,18 @@ class AppDataCache {
 
   // ─── Load from cache (SharedPreferences) ──────────────────
 
-  Future<void> loadFromLocal() async {
-    final results = await Future.wait([
-      _api.getCachedAccounts(),
-      _api.getCachedCategories(),
-      _api.getCachedCreditCardCaps(),
-      _api.getCachedSplitwiseGroups(),
-    ]);
-
-    final accountsData = results[0];
-    final catData = results[1];
-    final capsData = results[2];
-    final groupsData = results[3];
-
-    if (accountsData != null) _parseAccounts(accountsData);
-    if (catData != null) _parseCategories(catData);
-    if (capsData != null) _parseCaps(capsData);
-    if (groupsData != null) _parseGroups(groupsData);
-  }
+  Future<void> loadFromLocal() => refreshAll();
 
   // ─── Fetch fresh from API ─────────────────────────────────
 
   Future<void> refreshAccounts() async {
     try {
-      final data = await _api.getAccounts();
-      _parseAccounts(data);
+      final data = await DirectSqlService.getAllActiveAccounts();
+      updateAccountsFromModels(
+        bankAccounts: data.bankAccounts,
+        creditCardAccounts: data.creditCardAccounts,
+        investmentAccounts: data.investmentAccounts,
+      );
     } catch (e) {
       debugPrint('[AppDataCache] refreshAccounts failed: $e');
     }
@@ -247,35 +236,19 @@ class AppDataCache {
   // ─── Ensure loaded (load from cache if not yet loaded) ────
 
   Future<void> ensureAccounts() async {
-    if (!_accountsLoaded) {
-      final cached = await _api.getCachedAccounts();
-      if (cached != null) _parseAccounts(cached);
-      _accountsLoaded = true;
-    }
+    if (!_accountsLoaded) await refreshAccounts();
   }
 
   Future<void> ensureCategories() async {
-    if (!_categoriesLoaded) {
-      final cached = await _api.getCachedCategories();
-      if (cached != null) _parseCategories(cached);
-      _categoriesLoaded = true;
-    }
+    if (!_categoriesLoaded) await refreshCategories();
   }
 
   Future<void> ensureCaps() async {
-    if (!_capsLoaded) {
-      final cached = await _api.getCachedCreditCardCaps();
-      if (cached != null) _parseCaps(cached);
-      _capsLoaded = true;
-    }
+    if (!_capsLoaded) await refreshCaps();
   }
 
   Future<void> ensureGroups() async {
-    if (!_groupsLoaded) {
-      final cached = await _api.getCachedSplitwiseGroups();
-      if (cached != null) _parseGroups(cached);
-      _groupsLoaded = true;
-    }
+    if (!_groupsLoaded) await refreshGroups();
   }
 
   // ─── Direct update (when data already fetched elsewhere) ───
@@ -341,6 +314,37 @@ class AppDataCache {
         .map((j) => SplitwiseGroup.fromJson(j))
         .toList();
     _groupsLoaded = true;
+  }
+
+  // ─── In-memory session / auth ─────────────────────────────
+
+  String? _sessionCookie;
+  String? _username;
+  String? _zohoAccessToken;
+  String? _zohoRefreshToken;
+
+  String? getSessionCookie() => _sessionCookie;
+  void saveSessionCookie(String cookie) => _sessionCookie = cookie;
+
+  String? getUsername() => _username;
+  void saveUsername(String username) => _username = username;
+
+  void clearSession() {
+    _sessionCookie = null;
+    _username = null;
+  }
+
+  // ─── In-memory Zoho tokens ────────────────────────────────
+
+  String? getZohoAccessToken() => _zohoAccessToken;
+  void saveZohoAccessToken(String token) => _zohoAccessToken = token;
+
+  String? getZohoRefreshToken() => _zohoRefreshToken;
+  void saveZohoRefreshToken(String token) => _zohoRefreshToken = token;
+
+  void clearZohoTokens() {
+    _zohoAccessToken = null;
+    _zohoRefreshToken = null;
   }
 
   /// Clear all cached data (e.g. on logout)

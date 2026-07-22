@@ -174,8 +174,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
       final requests = <Future<dynamic>>[
         DirectSqlService.getAllTransactions(month, year),
       ];
-      if (shouldFetchAccounts) {
-        requests.add(_api.getAccounts());
+      if (shouldFetchAccounts) 
+      {
+        requests.add(DirectSqlService.getAllActiveAccounts());
       }
       if (shouldFetchMonthly) {
         requests.add(DirectSqlService.getExpenseCategories(month, year));
@@ -185,7 +186,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
       var resultIdx = 0;
   final txList = results[resultIdx++] as List<TransactionModel>;
-      Map<String, dynamic>? accountsData;
+      ActiveAccountsResult? accountsData;
       ({
         List<Category> categories,
         double totalIncome,
@@ -194,7 +195,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
       })? monthlyData;
 
       if (shouldFetchAccounts) {
-        accountsData = results[resultIdx++] as Map<String, dynamic>;
+        accountsData = results[resultIdx++] as ActiveAccountsResult;
       }
       if (shouldFetchMonthly) {
         monthlyData = results[resultIdx++] as ({
@@ -206,8 +207,13 @@ class _TransactionScreenState extends State<TransactionScreen> {
       }
 
       // Update cache with fresh accounts
-      if (accountsData != null && accountsData.isNotEmpty) {
-        cache.updateAccounts(accountsData);
+      if (accountsData != null) 
+      {
+        cache.updateAccountsFromModels(
+          bankAccounts: accountsData.bankAccounts,
+          creditCardAccounts: accountsData.creditCardAccounts,
+          investmentAccounts: accountsData.investmentAccounts,
+        );
       }
       final banks = cache.bankAccounts;
       final cards = cache.creditCardAccounts;

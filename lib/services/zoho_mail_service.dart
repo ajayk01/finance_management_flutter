@@ -6,7 +6,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'local_storage_service.dart';
 
 class ZohoMailService {
   static final ZohoMailService _instance = ZohoMailService._internal();
@@ -20,7 +19,6 @@ class ZohoMailService {
   static String get _clientSecret => dotenv.env['ZOHO_CLIENT_SECRET'] ?? '';
   static const String _scope = 'ZohoMail.messages.READ,ZohoMail.attachments.READ,ZohoMail.accounts.ALL';
 
-  final LocalStorageService _localStorage = LocalStorageService();
   String? _accessToken;
   String? _refreshToken;
 
@@ -29,10 +27,7 @@ class ZohoMailService {
   // ─── Token Management ──────────────────────────────────────
 
   Future<void> loadTokens() async {
-    _accessToken = await _localStorage.getZohoAccessToken();
-    _refreshToken = await _localStorage.getZohoRefreshToken();
-    // Fall back to .env refresh token if none stored
-    _refreshToken ??= dotenv.env['ZOHO_REFRESH_TOKEN'];
+    _refreshToken = dotenv.env['ZOHO_REFRESH_TOKEN'];
   }
 
   Future<String> _getAccessToken() async {
@@ -146,18 +141,13 @@ class ZohoMailService {
         // Clear invalid tokens so isAuthenticated returns false
         _accessToken = null;
         _refreshToken = null;
-        await _localStorage.clearZohoTokens();
         throw ZohoException(0, 'Refresh token invalid: ${data['error']}');
       }
 
       _accessToken = data['access_token'] as String?;
-      if (_accessToken != null) {
-        await _localStorage.saveZohoAccessToken(_accessToken!);
-      }
-      // If a new refresh token is returned, save it
+      // If a new refresh token is returned, update in memory
       if (data['refresh_token'] != null) {
         _refreshToken = data['refresh_token'] as String;
-        await _localStorage.saveZohoRefreshToken(_refreshToken!);
       }
     } else {
       throw ZohoException(response.statusCode, 'Failed to refresh token: ${response.body}');
@@ -182,12 +172,6 @@ class ZohoMailService {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       _accessToken = data['access_token'] as String?;
       _refreshToken = data['refresh_token'] as String?;
-      if (_accessToken != null) {
-        await _localStorage.saveZohoAccessToken(_accessToken!);
-      }
-      if (_refreshToken != null) {
-        await _localStorage.saveZohoRefreshToken(_refreshToken!);
-      }
     } else {
       throw ZohoException(response.statusCode, 'Failed to exchange auth code: ${response.body}');
     }
@@ -196,7 +180,6 @@ class ZohoMailService {
   /// Set a pre-existing refresh token directly
   Future<void> setRefreshToken(String token) async {
     _refreshToken = token;
-    await _localStorage.saveZohoRefreshToken(token);
   }
 
   // ─── Mail API ──────────────────────────────────────────────

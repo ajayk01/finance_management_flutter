@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'local_storage_service.dart';
+import 'app_data_cache.dart';
 
 class ApiService {
   // TODO: Update with your actual base URL
@@ -12,7 +12,8 @@ class ApiService {
   ApiService._internal();
 
   final http.Client _client = http.Client();
-  final LocalStorageService _localStorage = LocalStorageService();
+  // Lazy getter avoids circular singleton initialization with AppDataCache
+  AppDataCache get _cache => AppDataCache();
 
   String? _sessionCookie;
 
@@ -23,7 +24,7 @@ class ApiService {
   }
 
   Future<void> loadCookie() async {
-    _sessionCookie = await _localStorage.getSessionCookie();
+    _sessionCookie = _cache.getSessionCookie();
   }
 
   void setCookie(String cookie) {
@@ -51,11 +52,11 @@ class ApiService {
         // Parse the cookie name=value (ignore attributes)
         final cookieValue = setCookie.split(';').first;
         _sessionCookie = cookieValue;
-        await _localStorage.saveSessionCookie(cookieValue);
+        _cache.saveSessionCookie(cookieValue);
       }
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (data['username'] != null) {
-        await _localStorage.saveUsername(data['username'] as String);
+        _cache.saveUsername(data['username'] as String);
       }
       return data;
     }
@@ -78,7 +79,7 @@ class ApiService {
       await _client.post(uri, headers: _headers);
     } catch (_) {}
     _sessionCookie = null;
-    await _localStorage.clearSession();
+    _cache.clearSession();
   }
 
   // ─── Generic Helpers ───────────────────────────────────────
@@ -144,17 +145,6 @@ class ApiService {
     debugPrint('[API DELETE] $endpoint ERROR: ${response.body}');
     throw ApiException(response.statusCode, response.body);
   }
-
-  // ─── 1. Accounts ──────────────────────────────────────────
-
-  Future<Map<String, dynamic>> getAccounts({String type = 'all'}) async {
-    final data = await _get('/accounts', {'type': type});
-    if (type == 'all') _localStorage.saveAccounts(data);
-    return data;
-  }
-
-  Future<Map<String, dynamic>?> getCachedAccounts() =>
-      _localStorage.loadAccounts();
 
   Future<Map<String, dynamic>> createAccount({
     required String accountName,
@@ -321,14 +311,8 @@ class ApiService {
 
   // ─── 10. Categories ───────────────────────────────────────
 
-  Future<Map<String, dynamic>> getCategories({String type = 'all'}) async {
-    final data = await _get('/categories', {'type': type});
-    _localStorage.saveCategories(data);
-    return data;
-  }
-
-  Future<Map<String, dynamic>?> getCachedCategories() =>
-      _localStorage.loadCategories();
+  Future<Map<String, dynamic>> getCategories({String type = 'all'}) =>
+      _get('/categories', {'type': type});
 
   Future<Map<String, dynamic>> createCategory({
     required String categoryName,
@@ -356,17 +340,11 @@ class ApiService {
 
   // ─── 12. Credit Card Caps ─────────────────────────────────
 
-  Future<Map<String, dynamic>> getCreditCardCaps({String? creditCardId}) async {
+  Future<Map<String, dynamic>> getCreditCardCaps({String? creditCardId}) {
     final params = <String, String>{};
     if (creditCardId != null) params['creditCardId'] = creditCardId;
-    final data = await _get('/credit-card-caps', params.isEmpty ? null : params);
-    if (creditCardId == null) _localStorage.saveCreditCardCaps(data);
-    return data;
+    return _get('/credit-card-caps', params.isEmpty ? null : params);
   }
-
-  Future<Map<String, dynamic>?> getCachedCreditCardCaps() =>
-      _localStorage.loadCreditCardCaps();
-
   Future<Map<String, dynamic>> createCreditCardCap({
     required String creditCardId,
     required String capName,
@@ -431,16 +409,10 @@ class ApiService {
     final uri = Uri.parse('$baseUrl/investment-accounts');
     final response = await _client.get(uri, headers: _headers);
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      _localStorage.saveInvestmentAccounts(data);
-      return data;
+      return jsonDecode(response.body);
     }
     throw ApiException(response.statusCode, response.body);
   }
-
-  Future<List<dynamic>?> getCachedInvestmentAccounts() =>
-      _localStorage.loadInvestmentAccounts();
-
   // ─── 19. MF NAV Data ─────────────────────────────────────
 
   Future<Map<String, dynamic>> getMfNavData({
@@ -529,15 +501,10 @@ class ApiService {
   }
 
   // ─── 26. Splitwise ────────────────────────────────────────
-
   Future<Map<String, dynamic>> getSplitwiseGroups() async {
     final data = await _get('/splitwise', null);
-    _localStorage.saveSplitwiseGroups(data);
     return data;
   }
-
-  Future<Map<String, dynamic>?> getCachedSplitwiseGroups() =>
-      _localStorage.loadSplitwiseGroups();
 
   // ─── 27. Splitwise Sync ───────────────────────────────────
 
