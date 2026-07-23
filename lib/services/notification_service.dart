@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -42,7 +43,7 @@ class NotificationService {
     await _requestPermission();
     await setupLocalNotifications();
     await _checkLaunchNotification();
-    _setupMessageHandlers();
+    await _setupMessageHandlers();  // IMPORTANT: Await this to ensure getInitialMessage completes
 
     final token = await _messaging.getToken();
     debugPrint('FCM Token: $token');
@@ -146,7 +147,7 @@ class NotificationService {
     }
   }
 
-  void _setupMessageHandlers() {
+  Future<void> _setupMessageHandlers() async {
     // Foreground messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       debugPrint('[FCM] Foreground message received');
@@ -159,13 +160,13 @@ class NotificationService {
     // When app is opened from a notification (background state)
     FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
 
-    // When app is opened from a terminated state via notification
-    _messaging.getInitialMessage().then((message) {
-      if (message != null) {
-        // Store and process after app navigation stack is ready.
-        _pendingRemoteNotificationData = Map<String, dynamic>.from(message.data);
-      }
-    });
+    // When app is opened from a terminated state via notification (MUST BE AWAITED)
+    final message = await _messaging.getInitialMessage();
+    if (message != null) {
+      debugPrint('[FCM] Initial message from terminated state: ${message.data}');
+      // Store and process after app navigation stack is ready.
+      _pendingRemoteNotificationData = Map<String, dynamic>.from(message.data);
+    }
   }
 
   Future<void> showNotification(RemoteMessage message) async {
@@ -205,8 +206,13 @@ class NotificationService {
     }
   }
 
+  bool hasPendingNotification() {
+    return _pendingLocalNotificationData != null || _pendingRemoteNotificationData != null;
+  }
+
   void markNavigationReady() {
     _navigationReady = true;
+    debugPrint('[FCM] Navigation ready. Processing pending notifications...');
     processPendingNotifications();
   }
 
@@ -277,10 +283,18 @@ class NotificationService {
 
   void _navigateToTransaction(String tnxId) async {
     final nav = navigatorKey.currentState;
-    if (nav == null) return;
+    if (nav == null) {
+      debugPrint('[FCM] Navigator not available for transaction $tnxId');
+      return;
+    }
     final context = nav.overlay?.context;
-    if (context == null) return;
+    if (context == null) {
+      debugPrint('[FCM] Context not available for transaction $tnxId');
+      return;
+    }
 
+    debugPrint('[FCM] Fetching transaction $tnxId...');
+    
     // Show loader
     showDialog(
       context: context,
@@ -289,22 +303,54 @@ class NotificationService {
     );
 
     try {
-      final data = await ApiService().getTransactionById(tnxId);
+      // Add timeout to prevent infinite loading
+      final data = await ApiService().getTransactionById(tnxId).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw TimeoutException('Failed to fetch transaction data within 10 seconds');
+        },
+      );
+      
       final txJson = data['transaction'] ?? data;
       final tx = TransactionModel.fromJson(
         txJson is Map<String, dynamic> ? txJson : data,
       );
-      // Dismiss loader
-      nav.pop();
-      nav.push(
-        MaterialPageRoute(
-          builder: (_) => AddTransactionScreen(prefill: tx, isEdit: true, fromNotification: true),
-        ),
-      );
+      
+      // Check if context still exists before dismissing
+      if (nav.mounted) {
+        // Dismiss loader
+        nav.pop();
+        nav.push(
+          MaterialPageRoute(
+            builder: (_) => AddTransactionScreen(prefill: tx, isEdit: true, fromNotification: true),
+          ),
+        );
+        debugPrint('[FCM] Successfully navigated to transaction $tnxId');
+      }
+    } on TimeoutException catch (e) {
+      debugPrint('[FCM] Transaction fetch timeout for $tnxId: $e');
+      if (nav.mounted) {
+        nav.pop();  // Dismiss loader
+        // Show error message with fresh context
+        final freshContext = nav.overlay?.context;
+        if (freshContext != null) {
+          ScaffoldMessenger.of(freshContext).showSnackBar(
+            const SnackBar(content: Text('Failed to load transaction. Please try again.')),
+          );
+        }
+      }
     } catch (e) {
-      // Dismiss loader
-      nav.pop();
       debugPrint('[FCM] Failed to fetch transaction $tnxId: $e');
+      if (nav.mounted) {
+        nav.pop();  // Dismiss loader
+        // Show error message with fresh context
+        final freshContext = nav.overlay?.context;
+        if (freshContext != null) {
+          ScaffoldMessenger.of(freshContext).showSnackBar(
+            SnackBar(content: Text('Error: ${e.toString()}')),
+          );
+        }
+      }
     }
   }
 

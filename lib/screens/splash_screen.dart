@@ -28,15 +28,50 @@ class _SplashScreenState extends State<SplashScreen> {
       await _initFirebase();
       await _initNotifications();
 
-      // Keep auth non-blocking so splash does not wait on session/network work.
-      unawaited(_initAuth());
+      // Start auth in background, but we'll wait for it if needed
+      final authFuture = _initAuth();
 
-      // Navigate to HomeScreen
       if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/home');
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          NotificationService.instance.markNavigationReady();
-        });
+        // Give notification service a brief moment to load pending notification data
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        // Re-check mounted after async gap
+        if (!mounted) return;
+        
+        // Check if there's a pending notification from cold start
+        final hasPendingNotification = NotificationService.instance.hasPendingNotification();
+        debugPrint('[SplashScreen] Pending notification check: $hasPendingNotification');
+        
+        if (hasPendingNotification) {
+          // IMPORTANT: Wait for auth to complete before processing notification
+          debugPrint('[SplashScreen] Waiting for auth before processing notification...');
+          await authFuture;
+          
+          // CRITICAL: Replace splash screen with home first to prevent coming back to splash
+          // This ensures navigation stack is [HomeScreen, AddTransactionScreen, ...]
+          // instead of [SplashScreen, AddTransactionScreen, ...] which would loop
+          debugPrint('[SplashScreen] Replacing splash with home before transaction navigation...');
+          if (mounted) {
+            Navigator.of(context).pushReplacementNamed('/home');
+          }
+          
+          // Now navigate to transaction on top of home
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            NotificationService.instance.markNavigationReady();
+          });
+        } else {
+          // No pending notification, go to home screen normally
+          // Auth continues in background
+          debugPrint('[SplashScreen] No pending notification, navigating to home...');
+          if (mounted) {
+            Navigator.of(context).pushReplacementNamed('/home');
+          }
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            NotificationService.instance.markNavigationReady();
+          });
+          // Let auth finish in background
+          unawaited(authFuture);
+        }
       }
     } catch (e) {
       debugPrint('Initialization error: $e');
