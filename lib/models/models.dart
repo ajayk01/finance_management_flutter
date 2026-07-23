@@ -108,6 +108,7 @@ class TransactionModel {
   final String? time;
   final String description;
   final double amount;
+  final double charges;
   final String type;
   final String? category;
   final String? subCategory;
@@ -129,6 +130,7 @@ class TransactionModel {
     this.time,
     required this.description,
     required this.amount,
+    this.charges = 0,
     required this.type,
     this.category,
     this.subCategory,
@@ -159,6 +161,7 @@ class TransactionModel {
         time: time,
         description: json['description'] ?? '',
         amount: _toDouble(json['amount']),
+        charges: _toDouble(json['charges']),
         type: json['type'] ?? '',
         category: json['category'],
         subCategory: json['subCategory'],

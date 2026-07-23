@@ -24,7 +24,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   DateTime _selectedDate = DateTime.now();
   TimeOfDay _selectedTime = TimeOfDay.now();
   final TextEditingController _amountController = TextEditingController(text: '');
+  final TextEditingController _chargesController = TextEditingController(text: '');
   final TextEditingController _descController = TextEditingController();
+  double _previousCharges = 0; // Track previous charges for auto-adjustment
   bool _showSplitwise = false;
   String _selectedGroup = '';
   final List<String> _selectedPeople = [];
@@ -63,6 +65,33 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     _loadCachedFormData();
     //_loadFormData();
     _applyPrefill();
+    
+    // Setup listener for charges to auto-adjust amount
+    _chargesController.addListener(_onChargesChanged);
+  }
+
+  void _onChargesChanged() {
+    // Only apply auto-adjustment for expense type
+    if (_selectedType != 1) return;
+    
+    final currentAmount = double.tryParse(_amountController.text) ?? 0;
+    final newCharges = double.tryParse(_chargesController.text) ?? 0;
+    
+    // Calculate net amount (what was actually paid)
+    final netAmount = currentAmount + _previousCharges;
+    
+    // Calculate new transaction amount: net - new charges
+    final newAmount = netAmount - newCharges;
+    
+    // Only update if the new amount is valid and different
+    if (newAmount > 0 && (newAmount - currentAmount).abs() > 0.01) {
+      _amountController.text = newAmount == newAmount.roundToDouble() && newAmount == newAmount.truncateToDouble()
+          ? newAmount.toStringAsFixed(0)
+          : newAmount.toStringAsFixed(2);
+    }
+    
+    // Update tracked charges
+    _previousCharges = newCharges;
   }
 
   void _applyPrefill() {
@@ -85,6 +114,12 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     _amountController.text = tx.amount == tx.amount.roundToDouble() && tx.amount == tx.amount.truncateToDouble()
         ? tx.amount.toStringAsFixed(0)
         : tx.amount.toString();
+    _chargesController.text = tx.charges > 0
+        ? (tx.charges == tx.charges.roundToDouble() && tx.charges == tx.charges.truncateToDouble()
+            ? tx.charges.toStringAsFixed(0)
+            : tx.charges.toString())
+        : '';
+    _previousCharges = tx.charges;
     _descController.text = tx.description;
     try {
       _selectedDate = DateTime.parse(tx.date);
@@ -500,6 +535,12 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           'subCategoryId': subCatObj.id,
         };
 
+        // Add charges for expense edit
+        if (_selectedType == 1) {
+          final charges = double.tryParse(_chargesController.text) ?? 0;
+          body['charges'] = charges;
+        }
+
         // Resolve account
         final isCreditCard = _creditCards.any((c) => c.name == _selectedAccount);
         if (isCreditCard) {
@@ -589,6 +630,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             );
             account = {'type': 'Bank', 'id': bank.id};
           }
+          final charges = double.tryParse(_chargesController.text) ?? 0;
           List<String>? splitUserIds;
           if (_showSplitwise && _splitwiseGroups.isNotEmpty) {
             final group = _splitwiseGroups.firstWhere(
@@ -605,6 +647,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           await _api.addExpense(
             account: account,
             amount: amount,
+            charges: charges,
             date: dateStr,
             description: _descController.text,
             categoryId: catObj.id,
@@ -699,6 +742,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   @override
   void dispose() {
     _amountController.dispose();
+    _chargesController.dispose();
     _descController.dispose();
     for (final c in _customAmountControllers.values) {
       c.dispose();
@@ -781,6 +825,64 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 },
               ),
               const SizedBox(height: 16),
+
+              // ── Charges (Expense only) ──
+              if (_selectedType == 1) ...[
+                _buildTextField(
+                  label: 'Charges',
+                  controller: _chargesController,
+                  hint: '0',
+                  icon: Icons.discount_outlined,
+                  keyboardType: const TextInputType.numberWithOptions(signed: false, decimal: true),
+                  prefix: '₹ ',
+                  readOnly: widget.fromNotification,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+                  ],
+                  validator: (v) {
+                    if (v != null && v.trim().isNotEmpty) {
+                      final parsed = double.tryParse(v.trim());
+                      if (parsed == null) return 'Enter a valid charges amount';
+                      if (parsed < 0) return 'Charges cannot be negative';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 8),
+                // ── Net Amount Display ──
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Builder(
+                    builder: (context) {
+                      final amount = double.tryParse(_amountController.text) ?? 0;
+                      final charges = double.tryParse(_chargesController.text) ?? 0;
+                      final netAmount = amount + charges;
+                      return Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Net Amount',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                          Text(
+                            '₹${netAmount.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: netAmount >= 0 ? const Color(0xFF5BC5A7) : const Color(0xFFEF4444),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
 
               // ── Date & Time ──
               _buildDateTimeField(),
