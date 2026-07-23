@@ -813,7 +813,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 icon: Icons.currency_rupee_outlined,
                 keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
                 prefix: '₹ ',
-                readOnly: widget.fromNotification || widget.lockFields.contains('amount'),
+                readOnly: widget.fromNotification || widget.lockFields.contains('amount') || (widget.isEdit && _selectedType == 1),
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'^-?\d*\.?\d*')),
                 ],
@@ -826,7 +826,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               ),
               const SizedBox(height: 16),
 
-              // ── Charges (Expense only) ──
+              // ── Charges (Expense only, enabled in edit mode) ──
               if (_selectedType == 1) ...[
                 _buildTextField(
                   label: 'Charges',
@@ -835,7 +835,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   icon: Icons.discount_outlined,
                   keyboardType: const TextInputType.numberWithOptions(signed: false, decimal: true),
                   prefix: '₹ ',
-                  readOnly: widget.fromNotification,
+                  readOnly: widget.fromNotification && !widget.isEdit,
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                   ],
