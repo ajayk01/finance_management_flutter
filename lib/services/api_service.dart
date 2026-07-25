@@ -205,27 +205,6 @@ class ApiService {
   Future<Map<String, dynamic>> updateExpense(Map<String, dynamic> body) =>
       _put('/add-expense', body);
 
-  // ─── 3. Add Income ────────────────────────────────────────
-
-  Future<Map<String, dynamic>> addIncome({
-    required double amount,
-    required String date,
-    required String description,
-    required Map<String, dynamic> account,
-    required String categoryId,
-    String? subCategoryId,
-  }) {
-    final body = <String, dynamic>{
-      'amount': amount,
-      'date': date,
-      'description': description,
-      'account': account,
-      'categoryId': categoryId,
-    };
-    if (subCategoryId != null) body['subCategoryId'] = subCategoryId;
-    return _post('/add-income', body);
-  }
-
   Future<Map<String, dynamic>> updateIncome(Map<String, dynamic> body) =>
       _put('/add-income', body);
 

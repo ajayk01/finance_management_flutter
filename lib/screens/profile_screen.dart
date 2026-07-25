@@ -8,6 +8,7 @@ import 'add_transfer_screen.dart';
 import 'analytics_screen.dart';
 import 'bank_statement_screen.dart';
 import 'cc_statement_screen.dart';
+import 'local_server_screen.dart';
 import 'pay_cc_bill_screen.dart';
 import 'splitwise_screen.dart';
 import 'unaudited_expense_screen.dart';
@@ -34,6 +35,16 @@ class ProfileScreen extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
+                );
+              },
+            ),
+            _buildOptionTile(
+              icon: Icons.dns_outlined,
+              title: 'Local Server',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LocalServerScreen()),
                 );
               },
             ),

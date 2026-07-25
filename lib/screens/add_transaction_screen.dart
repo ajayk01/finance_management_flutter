@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
 import '../services/app_data_cache.dart';
+import '../services/direct_sql_service.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   final TransactionModel? prefill;
@@ -510,6 +511,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     setState(() => _submitting = true);
     try {
       final amount = double.tryParse(_amountController.text) ?? 0;
+      final transactionDate = DateTime(
+        _selectedDate.year,
+        _selectedDate.month,
+        _selectedDate.day,
+        _selectedTime.hour,
+        _selectedTime.minute,
+      );
       final dateStr =
           '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
 
@@ -597,6 +605,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             break;
         }
 
+        _showTransactionToast(
+          '${_transactionLabel(_selectedType)} updated successfully',
+        );
+
         if (mounted) Navigator.pop(context, true);
         return;
       }
@@ -608,13 +620,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             (b) => b.name == _selectedAccount,
             orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
           );
-          await _api.addIncome(
-            account: {'type': 'Bank', 'id': bank.id},
+          await DirectSqlService.addIncomeTransaction(
             amount: amount,
-            date: dateStr,
-            description: _descController.text,
+            accountId: bank.id,
             categoryId: catObj.id,
             subCategoryId: subCatObj.id,
+            notes: _descController.text,
+            date: transactionDate,
           );
           break;
         case 1: // Expense
@@ -710,6 +722,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           break;
       }
 
+      _showTransactionToast(
+        '${_transactionLabel(_selectedType)} added successfully',
+      );
+
       if (mounted) {
         Navigator.pop(context, true);
       }
@@ -722,6 +738,32 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  String _transactionLabel(int type) {
+    switch (type) {
+      case 0:
+        return 'Income';
+      case 1:
+        return 'Expense';
+      case 2:
+        return 'Transfer';
+      case 3:
+        return 'Investment';
+      default:
+        return 'Transaction';
+    }
+  }
+
+  void _showTransactionToast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: const Color(0xFF16A34A),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   String get _formattedDate {

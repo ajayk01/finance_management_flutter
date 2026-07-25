@@ -131,4 +131,17 @@ class MySqlService {
       'rows': rows
     };
   }
+
+  Future<void> executeWriteQuery(
+    String query, [
+    Map<String, dynamic>? params,
+  ]) async {
+    final conn = _conn;
+    if (conn == null) {
+      throw StateError(
+          'MySQL connection is not initialized. Call connect() first.');
+    }
+
+    await conn.execute(query, params);
+  }
 }

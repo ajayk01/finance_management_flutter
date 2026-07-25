@@ -128,6 +128,71 @@ class DirectSqlService
         }
     }
 
+    static Future<void> addIncomeTransaction({
+        required double amount,
+        required String accountId,
+        required String categoryId,
+        String? subCategoryId,
+        required String notes,
+        DateTime? date,
+    }) async {
+        final sql = '''
+INSERT INTO Transactions (
+    AMOUNT,
+    TRANSCATION_TYPE,
+    CATEGORY_ID,
+    SUB_CATEGORY_ID,
+    FROM_ACCOUNT_ID,
+    TO_ACCOUNT_ID,
+    NOTES,
+    DATE
+)
+VALUES (
+    :amount,
+    :transactionType,
+    :categoryId,
+    :subCategoryId,
+    :fromAccountId,
+    NULL,
+    :notes,
+    :date
+)
+''';
+
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        final parsedAccountId = int.tryParse(accountId);
+        if (parsedAccountId == null) {
+            throw ArgumentError('Invalid accountId: $accountId');
+        }
+
+        final parsedCategoryId = int.tryParse(categoryId);
+        if (parsedCategoryId == null) {
+            throw ArgumentError('Invalid categoryId: $categoryId');
+        }
+
+        final parsedSubCategoryId = subCategoryId == null || subCategoryId.trim().isEmpty
+            ? null
+            : int.tryParse(subCategoryId);
+        if (subCategoryId != null && subCategoryId.trim().isNotEmpty && parsedSubCategoryId == null) {
+            throw ArgumentError('Invalid subCategoryId: $subCategoryId');
+        }
+
+        final params = <String, dynamic>{
+            'amount': amount,
+            'transactionType': 2,
+            'categoryId': parsedCategoryId,
+            'subCategoryId': parsedSubCategoryId,
+            'fromAccountId': parsedAccountId,
+            'notes': notes.trim(),
+            'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
+        };
+
+        await service.executeWriteQuery(sql, params);
+    }
+
     static Future<ActiveAccountsResult> getAllActiveAccounts() async
     {
         String sql = "SELECT ID,ACCOUNT_NAME,CURRENT_BALANCE, INITIAL_BALANCE, ACCOUNT_TYPE, IMG FROM Accounts WHERE IS_ACTIVE = 1";
@@ -687,5 +752,4 @@ class DirectSqlService
             return <CreditCardCap>[];
         }
     }
-
 }
