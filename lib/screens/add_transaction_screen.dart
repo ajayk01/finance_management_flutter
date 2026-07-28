@@ -695,12 +695,12 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 ? BankAccount(id: _creditCards.firstWhere((c) => c.name == _selectedToAccount, orElse: () => _creditCards.first).id, name: _selectedToAccount, balance: 0)
                 : BankAccount(id: '', name: _selectedToAccount, balance: 0),
           );
-          await _api.addTransfer(
-            fromAccountId: int.tryParse(fromAccount.id) ?? 0,
-            toAccountId: int.tryParse(toAccount.id) ?? 0,
+          await DirectSqlService.addTransferTransaction(
             amount: amount,
-            date: dateStr,
-            description: _descController.text,
+            fromAccountId: fromAccount.id,
+            toAccountId: toAccount.id,
+            notes: _descController.text,
+            date: transactionDate,
           );
           break;
         case 3: // Investment

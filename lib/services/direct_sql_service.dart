@@ -193,6 +193,66 @@ VALUES (
         await service.executeWriteQuery(sql, params);
     }
 
+    static Future<void> addTransferTransaction({
+        required double amount,
+        required String fromAccountId,
+        required String toAccountId,
+        String? notes,
+        DateTime? date,
+    }) async {
+        final sql = '''
+INSERT INTO Transactions (
+    AMOUNT,
+    TRANSCATION_TYPE,
+    CATEGORY_ID,
+    SUB_CATEGORY_ID,
+    FROM_ACCOUNT_ID,
+    TO_ACCOUNT_ID,
+    NOTES,
+    DATE
+)
+VALUES (
+    :amount,
+    :transactionType,
+    NULL,
+    NULL,
+    :fromAccountId,
+    :toAccountId,
+    :notes,
+    :date
+)
+''';
+
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        final parsedFromAccountId = int.tryParse(fromAccountId);
+        if (parsedFromAccountId == null) {
+            throw ArgumentError('Invalid fromAccountId: $fromAccountId');
+        }
+
+        final parsedToAccountId = int.tryParse(toAccountId);
+        if (parsedToAccountId == null) {
+            throw ArgumentError('Invalid toAccountId: $toAccountId');
+        }
+
+        if (parsedFromAccountId == parsedToAccountId) {
+            throw ArgumentError('From and To accounts must be different');
+        }
+
+        final params = <String, dynamic>{
+            'amount': amount,
+            'transactionType': 3,
+            'fromAccountId': parsedFromAccountId,
+            'toAccountId': parsedToAccountId,
+            'notes': (notes ?? '').trim(),
+            'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
+        };
+
+        await service.executeWriteQuery(sql, params);
+    }
+
     static Future<ActiveAccountsResult> getAllActiveAccounts() async
     {
         String sql = "SELECT ID,ACCOUNT_NAME,CURRENT_BALANCE, INITIAL_BALANCE, ACCOUNT_TYPE, IMG FROM Accounts WHERE IS_ACTIVE = 1";

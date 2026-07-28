@@ -4,7 +4,6 @@ import 'add_account_screen.dart';
 import 'add_category_screen.dart';
 import 'add_credit_cap_screen.dart';
 import 'add_subcategory_screen.dart';
-import 'add_transfer_screen.dart';
 import 'analytics_screen.dart';
 import 'bank_statement_screen.dart';
 import 'cc_statement_screen.dart';
@@ -84,11 +83,6 @@ class ProfileScreen extends StatelessWidget {
                   MaterialPageRoute(builder: (_) => const AddAccountScreen()),
                 );
               },
-            ),
-            _buildOptionTile(
-              icon: Icons.swap_horiz_rounded,
-              title: 'Add Transfer',
-              onTap: () => AddTransferSheet.show(context),
             ),
             const SizedBox(height: 20),
             _buildSectionHeader('Categories'),

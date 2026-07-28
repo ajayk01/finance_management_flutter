@@ -228,23 +228,6 @@ class ApiService {
   Future<Map<String, dynamic>> updateInvestment(Map<String, dynamic> body) =>
       _put('/add-investment', body);
 
-  // ─── 5. Add Transfer ──────────────────────────────────────
-
-  Future<Map<String, dynamic>> addTransfer({
-    required int fromAccountId,
-    required int toAccountId,
-    required double amount,
-    required String date,
-    required String description,
-  }) =>
-      _post('/add-transfer', {
-        'fromAccountId': fromAccountId,
-        'toAccountId': toAccountId,
-        'amount': amount,
-        'date': date,
-        'description': description,
-      });
-
   // ─── 6. All Transactions ──────────────────────────────────
 
   Future<Map<String, dynamic>> getAllTransactions({
