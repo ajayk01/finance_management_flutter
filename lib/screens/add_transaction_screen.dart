@@ -712,12 +712,12 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             (a) => a.name == _selectedToAccount,
             orElse: () => InvestmentAccount(id: '', name: _selectedToAccount),
           );
-          await _api.addInvestment(
-            accountId: fromBank.id,
-            investmentAccountId: inv.id,
+          await DirectSqlService.addInvestmentTransaction(
             amount: amount,
-            date: dateStr,
-            description: _descController.text,
+            fromAccountId: fromBank.id,
+            investmentAccountId: inv.id,
+            notes: _descController.text,
+            date: transactionDate,
           );
           break;
       }
