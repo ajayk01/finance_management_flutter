@@ -215,12 +215,6 @@ class ApiService {
 
   // ─── 6. All Transactions ──────────────────────────────────
 
-  Future<Map<String, dynamic>> getAllTransactions({
-    required String month,
-    required String year,
-  }) =>
-      _get('/all-transactions', {'month': month, 'year': year});
-
   Future<Map<String, dynamic>> bulkDeleteTransactions(
           List<String> transactionIds) =>
       _post('/all-transactions',

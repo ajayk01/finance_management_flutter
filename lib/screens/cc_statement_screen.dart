@@ -2,8 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
 import '../services/cc_statement_parser.dart';
+import '../services/direct_sql_service.dart';
 import '../services/zoho_mail_service.dart';
 import '../utils/currency_formatter.dart';
 import 'add_transaction_screen.dart';
@@ -246,7 +246,6 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
   Future<void> _fetchAndMergeDbTransactions(CCStatementResult result) async {
     setState(() => _fetchingDb = true);
     try {
-      final api = ApiService();
       final startDate = result.effectiveStartDate;
       final endDate = result.effectiveEndDate;
 
@@ -280,14 +279,11 @@ class _CCStatementScreenState extends State<CCStatementScreen> with SingleTicker
       final allDbTxns = <TransactionModel>[];
       final futures = months.map((my) {
         final parts = my.split('-');
-        return api.getAllTransactions(month: parts[0], year: parts[1]);
+        return DirectSqlService.getAllTransactions(parts[0], parts[1]);
       }).toList();
 
       final results = await Future.wait(futures);
-      for (final data in results) {
-        final txList = (data['transactions'] as List? ?? [])
-            .map((j) => TransactionModel.fromJson(j))
-            .toList();
+      for (final txList in results) {
         allDbTxns.addAll(txList);
       }
 

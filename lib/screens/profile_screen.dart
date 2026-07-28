@@ -5,7 +5,6 @@ import 'add_category_screen.dart';
 import 'add_credit_cap_screen.dart';
 import 'add_subcategory_screen.dart';
 import 'analytics_screen.dart';
-import 'bank_statement_screen.dart';
 import 'cc_statement_screen.dart';
 import 'local_server_screen.dart';
 import 'pay_cc_bill_screen.dart';
@@ -116,12 +115,7 @@ class ProfileScreen extends StatelessWidget {
             _buildOptionTile(
               icon: Icons.credit_card_outlined,
               title: 'Upload CC Statement',
-              onTap: () => _pickAndOpenStatement(context, isCC: true),
-            ),
-            _buildOptionTile(
-              icon: Icons.account_balance_outlined,
-              title: 'Upload Bank Statement',
-              onTap: () => _pickAndOpenStatement(context, isCC: false),
+              onTap: () => _pickAndOpenStatement(context),
             ),
           ],
         ),
@@ -129,7 +123,7 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _pickAndOpenStatement(BuildContext context, {required bool isCC}) async {
+  Future<void> _pickAndOpenStatement(BuildContext context) async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf'],
@@ -139,21 +133,12 @@ class ProfileScreen extends StatelessWidget {
     if (path == null) return;
     if (!context.mounted) return;
 
-    if (isCC) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => CCStatementScreen.fromFile(localPdfPath: path),
-        ),
-      );
-    } else {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => BankStatementScreen.fromFile(localPdfPath: path),
-        ),
-      );
-    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CCStatementScreen.fromFile(localPdfPath: path),
+      ),
+    );
   }
 
   Widget _buildTopBar(BuildContext context) {
