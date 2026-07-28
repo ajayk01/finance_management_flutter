@@ -226,23 +226,6 @@ class ApiService {
   Future<Map<String, dynamic>> getTransactionById(String id) =>
       _get('/all-transactions', {'id': id});
 
-  // ─── 7. Bank Details ──────────────────────────────────────
-
-  Future<Map<String, dynamic>> getBankDetails() =>
-      _get('/bank-details', null);
-
-  // ─── 8. Bank Transactions ─────────────────────────────────
-
-  Future<Map<String, dynamic>> getBankTransactions({
-    required String accountId,
-    String? month,
-    String? year,
-  }) {
-    final params = <String, String>{'accountId': accountId};
-    if (month != null) params['month'] = month;
-    if (year != null) params['year'] = year;
-    return _get('/bank-transactions', params);
-  }
 
   // ─── 9. Calculate XIRR ────────────────────────────────────
 
@@ -308,24 +291,9 @@ class ApiService {
 
   // ─── 14. Credit Card Transactions ─────────────────────────
 
-  Future<Map<String, dynamic>> getCreditCardTransactions({
-    required String creditCardId,
-    String? month,
-    String? year,
-  }) {
-    final params = <String, String>{'creditCardId': creditCardId};
-    if (month != null) params['month'] = month;
-    if (year != null) params['year'] = year;
-    return _get('/credit-card-transactions', params);
-  }
 
   // ─── 15. Financial Details ────────────────────────────────
 
-  Future<Map<String, dynamic>> getFinancialDetails({
-    required String month,
-    required String year,
-  }) =>
-      _get('/financial-details', {'month': month, 'year': year});
 
   // ─── 16. Friend Transactions ──────────────────────────────
 
@@ -343,31 +311,6 @@ class ApiService {
   Future<Map<String, dynamic>> getFriendsBalance({bool refresh = false}) =>
       _get('/friends-balance',
           refresh ? {'refresh': 'true'} : null);
-
-  // ─── 18. Investment Accounts ──────────────────────────────
-
-  Future<List<dynamic>> getInvestmentAccounts() async {
-    final uri = Uri.parse('$baseUrl/investment-accounts');
-    final response = await _client.get(uri, headers: _headers);
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    }
-    throw ApiException(response.statusCode, response.body);
-  }
-  // ─── 19. MF NAV Data ─────────────────────────────────────
-
-  Future<Map<String, dynamic>> getMfNavData({
-    String? schemeCode,
-    String? search,
-    String period = '1y',
-  }) {
-    final params = <String, String>{'period': period};
-    if (schemeCode != null) params['schemeCode'] = schemeCode;
-    if (search != null) params['search'] = search;
-    return _get('/mf-nav-data', params);
-  }
-
-  // ─── 20. MF Portfolio Analysis ────────────────────────────
 
   Future<Map<String, dynamic>> analyzeMfPortfolio(
           List<Map<String, dynamic>> transactions) =>
@@ -441,12 +384,6 @@ class ApiService {
     return _post('/settle-up', body);
   }
 
-  // ─── 26. Splitwise ────────────────────────────────────────
-  Future<Map<String, dynamic>> getSplitwiseGroups() async {
-    final data = await _get('/splitwise', null);
-    return data;
-  }
-
   // ─── 27. Splitwise Sync ───────────────────────────────────
 
   Future<Map<String, dynamic>> syncSplitwise() =>
@@ -454,9 +391,7 @@ class ApiService {
 
   // ─── 28. Total Investments ────────────────────────────────
 
-  Future<Map<String, dynamic>> getTotalInvestments() =>
-      _get('/total-investments', null);
-
+  
   // ─── 29. Unaudited Expenses ───────────────────────────────
 
   Future<Map<String, dynamic>> getUnauditedExpenses() =>
@@ -484,10 +419,7 @@ class ApiService {
 
   // ─── 30. Unsettled Splitwise Expenses ─────────────────────
 
-  Future<Map<String, dynamic>> getUnsettledSplitwiseExpenses(
-          String friendId) =>
-      _get('/unsettled-splitwise-expenses', {'friendId': friendId});
-
+ 
   // ─── 31. Yearly Summary ───────────────────────────────────
 
   Future<Map<String, dynamic>> getYearlySummary(String year) =>
