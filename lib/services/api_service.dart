@@ -132,56 +132,6 @@ class ApiService {
     throw ApiException(response.statusCode, response.body);
   }
 
-  // ─── 2. Add Expense ───────────────────────────────────────
-
-  Future<Map<String, dynamic>> addExpense({
-    required double amount,
-    required String date,
-    required Map<String, dynamic> account,
-    double charges = 0,
-    String? description,
-    String? categoryId,
-    String? subCategoryId,
-    String? capId,
-    bool includeSplitwise = false,
-    String? splitwiseGroupId,
-    List<String>? splitwiseUserIds,
-    String? splitType,
-    Map<String, double>? customAmounts,
-  }) {
-    final body = <String, dynamic>{
-      'amount': amount,
-      'date': date,
-      'account': account,
-      'charges': charges,
-    };
-    if (description != null) body['description'] = description;
-    if (categoryId != null) body['categoryId'] = categoryId;
-    if (subCategoryId != null) body['subCategoryId'] = subCategoryId;
-    if (capId != null) body['capId'] = capId;
-    if (includeSplitwise) {
-      body['includeSplitwise'] = true;
-      if (splitwiseGroupId != null) {
-        body['splitwiseGroupId'] = splitwiseGroupId;
-      }
-      if (splitwiseUserIds != null) {
-        body['splitwiseUserIds'] = splitwiseUserIds;
-      }
-      if (splitType != null) body['splitType'] = splitType;
-      if (customAmounts != null) body['customAmounts'] = customAmounts;
-    }
-    return _post('/add-expense', body);
-  }
-
-  Future<Map<String, dynamic>> updateExpense(Map<String, dynamic> body) =>
-      _put('/add-expense', body);
-
-    // ─── 4. Add Investment ────────────────────────────────────
-
-  // ─── 6. All Transactions ──────────────────────────────────
-
-
-  // ─── 9. Calculate XIRR ────────────────────────────────────
 
   Future<Map<String, dynamic>> calculateXirr(String investmentAccountId) =>
       _post('/calculate-xirr',

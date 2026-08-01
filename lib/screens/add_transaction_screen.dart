@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
 import '../services/app_data_cache.dart';
+import '../services/direct_expense_service.dart';
 import '../services/direct_sql_service.dart';
 
 class AddTransactionScreen extends StatefulWidget {
@@ -40,8 +40,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   String _selectedToAccount = '';
   String? _fromAccountError;
   String? _toAccountError;
-  final _api = ApiService();
-
 
   bool _loading = true;
   bool _submitting = false;
@@ -663,7 +661,27 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               body['account'] = {'type': 'Bank', 'id': bank.id};
               body['accountId'] = bank.id;
             }
-            await _api.updateExpense(body);
+            await DirectExpenseService.updateExpense(
+              id: body['id'] as String,
+              amount: (body['amount'] as num).toDouble(),
+              charges: (body['charges'] as num?)?.toDouble() ?? 0,
+              date: body['date'] as String,
+              description: body['description']?.toString(),
+              account: Map<String, dynamic>.from(body['account'] as Map),
+              categoryId: body['categoryId'] as String,
+              subCategoryId: body['subCategoryId']?.toString(),
+              capId: body['capId']?.toString(),
+              updateSplitwise: true,
+              includeSplitwise: body['includeSplitwise'] == true,
+              splitwiseGroupId: body['splitwiseGroupId']?.toString(),
+              splitwiseUserIds: (body['splitwiseUserIds'] as List?)
+                  ?.map((e) => e.toString())
+                  .toList(),
+              splitType: body['splitType']?.toString(),
+              customAmounts: (body['customAmounts'] as Map?)?.map(
+                (key, value) => MapEntry(key.toString(), (value as num).toDouble()),
+              ),
+            );
             break;
           case 2:
             final fromAccount = _bankAccounts.firstWhere(
@@ -758,7 +776,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     .id)
                 .toList();
           }
-          await _api.addExpense(
+          await DirectExpenseService.addExpense(
             account: account,
             amount: amount,
             charges: charges,
