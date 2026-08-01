@@ -42,12 +42,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   String? _toAccountError;
   final _api = ApiService();
 
-  static const _typeIcons = [
-    Icons.arrow_downward_outlined,
-    Icons.arrow_upward_outlined,
-    Icons.swap_horiz_outlined,
-    Icons.trending_up_outlined,
-  ];
 
   bool _loading = true;
   bool _submitting = false;
@@ -334,24 +328,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       caps: cache.creditCardCaps,
       groups: cache.splitwiseGroups,
     );
-  }
-
-  Future<void> _loadFormData() async {
-    try {
-      final cache = AppDataCache();
-      await cache.refreshAll();
-
-      _applyFormData(
-        cats: cache.categories,
-        banks: cache.bankAccounts,
-        cards: cache.creditCardAccounts,
-        invs: cache.investmentAccounts,
-        caps: cache.creditCardCaps,
-        groups: cache.splitwiseGroups,
-      );
-    } catch (e) {
-      if (mounted) setState(() => _loading = false);
-    }
   }
 
   List<String> get _categories {
