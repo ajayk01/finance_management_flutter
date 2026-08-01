@@ -190,13 +190,7 @@ class ApiService {
   Future<Map<String, dynamic>> updateExpense(Map<String, dynamic> body) =>
       _put('/add-expense', body);
 
-  Future<Map<String, dynamic>> updateIncome(Map<String, dynamic> body) =>
-      _put('/add-income', body);
-
-  // ─── 4. Add Investment ────────────────────────────────────
-
-  Future<Map<String, dynamic>> updateInvestment(Map<String, dynamic> body) =>
-      _put('/add-investment', body);
+    // ─── 4. Add Investment ────────────────────────────────────
 
   // ─── 6. All Transactions ──────────────────────────────────
 

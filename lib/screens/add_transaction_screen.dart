@@ -593,7 +593,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             )
           : SubCategory(id: '', name: _selectedSubCategory);
 
-      // ── Edit mode: call update APIs ──
+      // ── Edit mode: call update handlers ──
       if (widget.isEdit && widget.prefill != null) {
         final body = <String, dynamic>{
           'id': widget.prefill!.id,
@@ -610,23 +610,22 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           body['charges'] = charges;
         }
 
-        // Resolve account
-        final isCreditCard = _creditCards.any((c) => c.name == _selectedAccount);
-        if (isCreditCard) {
-          final card = _creditCards.firstWhere((c) => c.name == _selectedAccount);
-          body['account'] = {'type': 'Credit Card', 'id': card.id};
-          body['accountId'] = card.id;
-        } else {
-          final bank = _bankAccounts.firstWhere(
-            (b) => b.name == _selectedAccount,
-            orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
-          );
-          body['account'] = {'type': 'Bank', 'id': bank.id};
-          body['accountId'] = bank.id;
-        }
-
         // Splitwise for expense edit
         if (_selectedType == 1 && _showSplitwise && _splitwiseGroups.isNotEmpty) {
+          final isCreditCard = _creditCards.any((c) => c.name == _selectedAccount);
+          if (isCreditCard) {
+            final card = _creditCards.firstWhere((c) => c.name == _selectedAccount);
+            body['account'] = {'type': 'Credit Card', 'id': card.id};
+            body['accountId'] = card.id;
+          } else {
+            final bank = _bankAccounts.firstWhere(
+              (b) => b.name == _selectedAccount,
+              orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
+            );
+            body['account'] = {'type': 'Bank', 'id': bank.id};
+            body['accountId'] = bank.id;
+          }
+
           body['includeSplitwise'] = true;
           final group = _splitwiseGroups.firstWhere(
             (g) => g.name == _selectedGroup,
@@ -660,14 +659,75 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
         switch (_selectedType) {
           case 0:
-            await _api.updateIncome(body);
+            final bank = _bankAccounts.firstWhere(
+              (b) => b.name == _selectedAccount,
+              orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
+            );
+            await DirectSqlService.updateIncomeTransaction(
+              transactionId: widget.prefill!.id,
+              amount: amount,
+              accountId: bank.id,
+              categoryId: catObj.id,
+              subCategoryId: subCatObj.id,
+              notes: _descController.text,
+              date: transactionDate,
+            );
             break;
           case 1:
+            final isCreditCard = _creditCards.any((c) => c.name == _selectedAccount);
+            if (isCreditCard) {
+              final card = _creditCards.firstWhere((c) => c.name == _selectedAccount);
+              body['account'] = {'type': 'Credit Card', 'id': card.id};
+              body['accountId'] = card.id;
+            } else {
+              final bank = _bankAccounts.firstWhere(
+                (b) => b.name == _selectedAccount,
+                orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
+              );
+              body['account'] = {'type': 'Bank', 'id': bank.id};
+              body['accountId'] = bank.id;
+            }
             await _api.updateExpense(body);
             break;
+          case 2:
+            final fromAccount = _bankAccounts.firstWhere(
+              (b) => b.name == _selectedFromAccount,
+              orElse: () => _creditCards.isNotEmpty
+                  ? BankAccount(id: _creditCards.firstWhere((c) => c.name == _selectedFromAccount, orElse: () => _creditCards.first).id, name: _selectedFromAccount, balance: 0)
+                  : BankAccount(id: '', name: _selectedFromAccount, balance: 0),
+            );
+            final toAccount = _bankAccounts.firstWhere(
+              (b) => b.name == _selectedToAccount,
+              orElse: () => _creditCards.isNotEmpty
+                  ? BankAccount(id: _creditCards.firstWhere((c) => c.name == _selectedToAccount, orElse: () => _creditCards.first).id, name: _selectedToAccount, balance: 0)
+                  : BankAccount(id: '', name: _selectedToAccount, balance: 0),
+            );
+            await DirectSqlService.updateTransferTransaction(
+              transactionId: widget.prefill!.id,
+              amount: amount,
+              fromAccountId: fromAccount.id,
+              toAccountId: toAccount.id,
+              notes: _descController.text,
+              date: transactionDate,
+            );
+            break;
           case 3:
-            body['investmentAccountId'] = widget.prefill!.investmentAccountId;
-            await _api.updateInvestment(body);
+            final fromBank = _bankAccounts.firstWhere(
+              (b) => b.name == _selectedFromAccount,
+              orElse: () => BankAccount(id: '', name: _selectedFromAccount, balance: 0),
+            );
+            final investmentAccount = _investmentAccounts.firstWhere(
+              (a) => a.name == _selectedToAccount,
+              orElse: () => InvestmentAccount(id: '', name: _selectedToAccount),
+            );
+            await DirectSqlService.updateInvestmentTransaction(
+              transactionId: widget.prefill!.id,
+              amount: amount,
+              fromAccountId: fromBank.id,
+              investmentAccountId: investmentAccount.id,
+              notes: _descController.text,
+              date: transactionDate,
+            );
             break;
         }
 

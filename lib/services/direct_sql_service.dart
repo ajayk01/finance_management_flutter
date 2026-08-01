@@ -466,6 +466,185 @@ VALUES (
         await service.executeWriteQuery(sql, params);
     }
 
+    static Future<void> updateIncomeTransaction({
+        required String transactionId,
+        required double amount,
+        required String accountId,
+        required String categoryId,
+        String? subCategoryId,
+        required String notes,
+        DateTime? date,
+    }) async {
+        final sql = '''
+UPDATE Transactions
+SET
+    AMOUNT = :amount,
+    TRANSCATION_TYPE = :transactionType,
+    CATEGORY_ID = :categoryId,
+    SUB_CATEGORY_ID = :subCategoryId,
+    FROM_ACCOUNT_ID = :fromAccountId,
+    TO_ACCOUNT_ID = NULL,
+    NOTES = :notes,
+    DATE = :date
+WHERE ID = :id
+''';
+
+        final parsedTransactionId = int.tryParse(transactionId);
+        if (parsedTransactionId == null) {
+            throw ArgumentError('Invalid transactionId: $transactionId');
+        }
+
+        final parsedAccountId = int.tryParse(accountId);
+        if (parsedAccountId == null) {
+            throw ArgumentError('Invalid accountId: $accountId');
+        }
+
+        final parsedCategoryId = int.tryParse(categoryId);
+        if (parsedCategoryId == null) {
+            throw ArgumentError('Invalid categoryId: $categoryId');
+        }
+
+        final parsedSubCategoryId = subCategoryId == null || subCategoryId.trim().isEmpty
+            ? null
+            : int.tryParse(subCategoryId);
+        if (subCategoryId != null && subCategoryId.trim().isNotEmpty && parsedSubCategoryId == null) {
+            throw ArgumentError('Invalid subCategoryId: $subCategoryId');
+        }
+
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        final params = <String, dynamic>{
+            'id': parsedTransactionId,
+            'amount': amount,
+            'transactionType': 2,
+            'categoryId': parsedCategoryId,
+            'subCategoryId': parsedSubCategoryId,
+            'fromAccountId': parsedAccountId,
+            'notes': notes.trim(),
+            'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
+        };
+
+        await service.executeWriteQuery(sql, params);
+    }
+
+    static Future<void> updateTransferTransaction({
+        required String transactionId,
+        required double amount,
+        required String fromAccountId,
+        required String toAccountId,
+        String? notes,
+        DateTime? date,
+    }) async {
+        final sql = '''
+UPDATE Transactions
+SET
+    AMOUNT = :amount,
+    TRANSCATION_TYPE = :transactionType,
+    CATEGORY_ID = NULL,
+    SUB_CATEGORY_ID = NULL,
+    FROM_ACCOUNT_ID = :fromAccountId,
+    TO_ACCOUNT_ID = :toAccountId,
+    NOTES = :notes,
+    DATE = :date
+WHERE ID = :id
+''';
+
+        final parsedTransactionId = int.tryParse(transactionId);
+        if (parsedTransactionId == null) {
+            throw ArgumentError('Invalid transactionId: $transactionId');
+        }
+
+        final parsedFromAccountId = int.tryParse(fromAccountId);
+        if (parsedFromAccountId == null) {
+            throw ArgumentError('Invalid fromAccountId: $fromAccountId');
+        }
+
+        final parsedToAccountId = int.tryParse(toAccountId);
+        if (parsedToAccountId == null) {
+            throw ArgumentError('Invalid toAccountId: $toAccountId');
+        }
+
+        if (parsedFromAccountId == parsedToAccountId) {
+            throw ArgumentError('From and To accounts must be different');
+        }
+
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        final params = <String, dynamic>{
+            'id': parsedTransactionId,
+            'amount': amount,
+            'transactionType': 3,
+            'fromAccountId': parsedFromAccountId,
+            'toAccountId': parsedToAccountId,
+            'notes': (notes ?? '').trim(),
+            'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
+        };
+
+        await service.executeWriteQuery(sql, params);
+    }
+
+    static Future<void> updateInvestmentTransaction({
+        required String transactionId,
+        required double amount,
+        required String fromAccountId,
+        required String investmentAccountId,
+        String? notes,
+        DateTime? date,
+    }) async {
+        final sql = '''
+UPDATE Transactions
+SET
+    AMOUNT = :amount,
+    TRANSCATION_TYPE = :transactionType,
+    CATEGORY_ID = NULL,
+    SUB_CATEGORY_ID = NULL,
+    FROM_ACCOUNT_ID = :fromAccountId,
+    TO_ACCOUNT_ID = :toAccountId,
+    NOTES = :notes,
+    DATE = :date
+WHERE ID = :id
+''';
+
+        final parsedTransactionId = int.tryParse(transactionId);
+        if (parsedTransactionId == null) {
+            throw ArgumentError('Invalid transactionId: $transactionId');
+        }
+
+        final parsedFromAccountId = int.tryParse(fromAccountId);
+        if (parsedFromAccountId == null) {
+            throw ArgumentError('Invalid fromAccountId: $fromAccountId');
+        }
+
+        final parsedInvestmentAccountId = int.tryParse(investmentAccountId);
+        if (parsedInvestmentAccountId == null) {
+            throw ArgumentError('Invalid investmentAccountId: $investmentAccountId');
+        }
+
+        if (parsedFromAccountId == parsedInvestmentAccountId) {
+            throw ArgumentError('From and investment accounts must be different');
+        }
+
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        final params = <String, dynamic>{
+            'id': parsedTransactionId,
+            'amount': amount,
+            'transactionType': 4,
+            'fromAccountId': parsedFromAccountId,
+            'toAccountId': parsedInvestmentAccountId,
+            'notes': (notes ?? '').trim(),
+            'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
+        };
+
+        await service.executeWriteQuery(sql, params);
+    }
+
     static Future<ActiveAccountsResult> getAllActiveAccounts() async
     {
         String sql = "SELECT ID,ACCOUNT_NAME,CURRENT_BALANCE, INITIAL_BALANCE, ACCOUNT_TYPE, IMG FROM Accounts WHERE IS_ACTIVE = 1";
