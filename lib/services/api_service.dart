@@ -146,21 +146,6 @@ class ApiService {
     throw ApiException(response.statusCode, response.body);
   }
 
-  Future<Map<String, dynamic>> createAccount({
-    required String accountName,
-    required String accountType,
-    double initialBalance = 0,
-    double? totalLimit,
-  }) {
-    final body = <String, dynamic>{
-      'accountName': accountName,
-      'accountType': accountType,
-      'initialBalance': initialBalance,
-    };
-    if (totalLimit != null) body['totalLimit'] = totalLimit;
-    return _post('/accounts', body);
-  }
-
   // ─── 2. Add Expense ───────────────────────────────────────
 
   Future<Map<String, dynamic>> addExpense({
@@ -238,29 +223,7 @@ class ApiService {
   Future<Map<String, dynamic>> getCategories({String type = 'all'}) =>
       _get('/categories', {'type': type});
 
-  Future<Map<String, dynamic>> createCategory({
-    required String categoryName,
-    required String categoryType,
-    double budget = 0,
-  }) =>
-      _post('/categories', {
-        'categoryName': categoryName,
-        'categoryType': categoryType,
-        'budget': budget,
-      });
-
   // ─── 11. Subcategory ──────────────────────────────────────
-
-  Future<Map<String, dynamic>> createSubcategory({
-    required int categoryId,
-    required String subCategoryName,
-    double budget = 0,
-  }) =>
-      _post('/categories/subcategory', {
-        'categoryId': categoryId,
-        'subCategoryName': subCategoryName,
-        'budget': budget,
-      });
 
   // ─── 12. Credit Card Caps ─────────────────────────────────
 

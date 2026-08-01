@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
+import '../services/direct_sql_service.dart';
 
 class AddAccountScreen extends StatefulWidget {
   const AddAccountScreen({super.key});
@@ -10,7 +10,6 @@ class AddAccountScreen extends StatefulWidget {
 
 class _AddAccountScreenState extends State<AddAccountScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _api = ApiService();
 
   final _nameController = TextEditingController();
   final _initialBalanceController = TextEditingController();
@@ -78,7 +77,7 @@ class _AddAccountScreenState extends State<AddAccountScreen> {
             double.tryParse(_initialBalanceController.text.trim()) ?? 0;
       }
 
-      await _api.createAccount(
+      await DirectSqlService.createAccount(
         accountName: name,
         accountType: _accountType,
         initialBalance: initialBalance,

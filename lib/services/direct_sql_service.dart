@@ -16,6 +16,33 @@ class ActiveAccountsResult {
 
 class DirectSqlService 
 {
+    static int _mapAccountType(String accountType) {
+        switch (accountType.trim().toLowerCase()) {
+            case 'bank':
+                return 1;
+            case 'credit_card':
+            case 'credit card':
+                return 2;
+            case 'investment':
+                return 3;
+            default:
+                throw ArgumentError('Invalid accountType: $accountType');
+        }
+    }
+
+    static int _mapCategoryType(String categoryType) {
+        switch (categoryType.trim().toLowerCase()) {
+            case 'expense':
+                return 1;
+            case 'income':
+                return 2;
+            case 'investment':
+                return 3;
+            default:
+                throw ArgumentError('Invalid categoryType: $categoryType');
+        }
+    }
+
     static double _toDouble(dynamic value) {
         if (value == null) {
             return 0;
@@ -188,6 +215,132 @@ VALUES (
             'fromAccountId': parsedAccountId,
             'notes': notes.trim(),
             'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
+        };
+
+        await service.executeWriteQuery(sql, params);
+    }
+
+    static Future<void> createAccount({
+        required String accountName,
+        required String accountType,
+        required double initialBalance,
+        double? totalLimit,
+    }) async {
+        final accountTypeValue = _mapAccountType(accountType);
+        final trimmedName = accountName.trim();
+        if (trimmedName.isEmpty) {
+            throw ArgumentError('accountName cannot be empty');
+        }
+
+        final isCreditCard = accountTypeValue == 2;
+        final currentBalance = initialBalance;
+        final initialBalanceValue = isCreditCard
+            ? (totalLimit ?? 0)
+            : initialBalance;
+
+        final sql = '''
+INSERT INTO Accounts (
+    ACCOUNT_NAME,
+    CURRENT_BALANCE,
+    INITIAL_BALANCE,
+    ACCOUNT_TYPE,
+    IS_ACTIVE
+)
+VALUES (
+    :accountName,
+    :currentBalance,
+    :initialBalance,
+    :accountType,
+    1
+)
+''';
+
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        final params = <String, dynamic>{
+            'accountName': trimmedName,
+            'currentBalance': currentBalance,
+            'initialBalance': initialBalanceValue,
+            'accountType': accountTypeValue,
+        };
+
+        await service.executeWriteQuery(sql, params);
+    }
+
+    static Future<void> createCategory({
+        required String categoryName,
+        required String categoryType,
+        double budget = 0,
+    }) async {
+        final categoryTypeValue = _mapCategoryType(categoryType);
+        final trimmedName = categoryName.trim();
+        if (trimmedName.isEmpty) {
+            throw ArgumentError('categoryName cannot be empty');
+        }
+
+        final sql = '''
+INSERT INTO Category (
+    CATEGORY_NAME,
+    CATEGORY_TYPE,
+    BUDGET
+)
+VALUES (
+    :categoryName,
+    :categoryType,
+    :budget
+)
+''';
+
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        final params = <String, dynamic>{
+            'categoryName': trimmedName,
+            'categoryType': categoryTypeValue,
+            'budget': budget,
+        };
+
+        await service.executeWriteQuery(sql, params);
+    }
+
+    static Future<void> createSubcategory({
+        required int categoryId,
+        required String subCategoryName,
+        double budget = 0,
+    }) async {
+        if (categoryId <= 0) {
+            throw ArgumentError('Invalid categoryId: $categoryId');
+        }
+
+        final trimmedName = subCategoryName.trim();
+        if (trimmedName.isEmpty) {
+            throw ArgumentError('subCategoryName cannot be empty');
+        }
+
+        final sql = '''
+INSERT INTO SubCategory (
+    CATEGORY_ID,
+    SUB_CATEGORY_NAME,
+    BUDGET
+)
+VALUES (
+    :categoryId,
+    :subCategoryName,
+    :budget
+)
+''';
+
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        final params = <String, dynamic>{
+            'categoryId': categoryId,
+            'subCategoryName': trimmedName,
+            'budget': budget,
         };
 
         await service.executeWriteQuery(sql, params);

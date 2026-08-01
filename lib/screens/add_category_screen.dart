@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
+import '../services/direct_sql_service.dart';
 
 class AddCategorySheet extends StatefulWidget {
   const AddCategorySheet({super.key});
@@ -19,7 +19,6 @@ class AddCategorySheet extends StatefulWidget {
 
 class _AddCategorySheetState extends State<AddCategorySheet> {
   final _formKey = GlobalKey<FormState>();
-  final _api = ApiService();
 
   final _nameController = TextEditingController();
   final _budgetController = TextEditingController(text: '0');
@@ -50,7 +49,7 @@ class _AddCategorySheetState extends State<AddCategorySheet> {
     setState(() => _submitting = true);
     try {
       final budget = double.tryParse(_budgetController.text.trim()) ?? 0;
-      await _api.createCategory(
+      await DirectSqlService.createCategory(
         categoryName: _nameController.text.trim(),
         categoryType: _selectedType!.toLowerCase(),
         budget: budget,
