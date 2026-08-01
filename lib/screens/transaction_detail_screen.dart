@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
+import '../services/direct_sql_service.dart';
 
 class TransactionDetailScreen extends StatefulWidget {
   final String transactionId;
@@ -13,7 +13,6 @@ class TransactionDetailScreen extends StatefulWidget {
 }
 
 class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
-  final _api = ApiService();
   bool _loading = true;
   String? _error;
   TransactionModel? _transaction;
@@ -26,12 +25,12 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
 
   Future<void> _fetchTransaction() async {
     try {
-      final data = await _api.getTransactionById(widget.transactionId);
-      final txJson = data['transaction'] ?? data;
+      final tx = await DirectSqlService.getTransactionById(widget.transactionId);
+      if (tx == null) {
+        throw StateError('Transaction not found');
+      }
       setState(() {
-        _transaction = TransactionModel.fromJson(
-          txJson is Map<String, dynamic> ? txJson : data,
-        );
+        _transaction = tx;
         _loading = false;
       });
     } catch (e) {

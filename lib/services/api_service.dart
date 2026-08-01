@@ -132,20 +132,6 @@ class ApiService {
     throw ApiException(response.statusCode, response.body);
   }
 
-  Future<Map<String, dynamic>> _delete(
-      String endpoint, Map<String, String>? params) async {
-    final uri = Uri.parse('$baseUrl$endpoint')
-        .replace(queryParameters: params);
-    debugPrint('[API DELETE] $uri');
-    final response = await _client.delete(uri, headers: _headers);
-    debugPrint('[API DELETE] $endpoint → ${response.statusCode}');
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
-    }
-    debugPrint('[API DELETE] $endpoint ERROR: ${response.body}');
-    throw ApiException(response.statusCode, response.body);
-  }
-
   // ─── 2. Add Expense ───────────────────────────────────────
 
   Future<Map<String, dynamic>> addExpense({
@@ -194,17 +180,6 @@ class ApiService {
 
   // ─── 6. All Transactions ──────────────────────────────────
 
-  Future<Map<String, dynamic>> bulkDeleteTransactions(
-          List<String> transactionIds) =>
-      _post('/all-transactions',
-          {'action': 'bulk-delete', 'transactionIds': transactionIds});
-
-  Future<Map<String, dynamic>> deleteTransaction(String id) =>
-      _delete('/all-transactions', {'id': id});
-
-  Future<Map<String, dynamic>> getTransactionById(String id) =>
-      _get('/all-transactions', {'id': id});
-
 
   // ─── 9. Calculate XIRR ────────────────────────────────────
 
@@ -217,8 +192,6 @@ class ApiService {
   Future<Map<String, dynamic>> getCategories({String type = 'all'}) =>
       _get('/categories', {'type': type});
 
-  // ─── 11. Subcategory ──────────────────────────────────────
-
   // ─── 12. Credit Card Caps ─────────────────────────────────
 
   Future<Map<String, dynamic>> getCreditCardCaps({String? creditCardId}) {
@@ -226,6 +199,7 @@ class ApiService {
     if (creditCardId != null) params['creditCardId'] = creditCardId;
     return _get('/credit-card-caps', params.isEmpty ? null : params);
   }
+
   Future<Map<String, dynamic>> createCreditCardCap({
     required String creditCardId,
     required String capName,
@@ -240,19 +214,6 @@ class ApiService {
         'capPercentage': capPercentage,
         'rewardPerAmount': rewardPerAmount,
       });
-
-  // ─── 13. Credit Card Details ──────────────────────────────
-
-  Future<Map<String, dynamic>> getCreditCardDetails() =>
-      _get('/credit-card-details', null);
-
-  // ─── 14. Credit Card Transactions ─────────────────────────
-
-
-  // ─── 15. Financial Details ────────────────────────────────
-
-
-  // ─── 16. Friend Transactions ──────────────────────────────
 
   Future<Map<String, dynamic>> getFriendTransactions({
     required String friendId,

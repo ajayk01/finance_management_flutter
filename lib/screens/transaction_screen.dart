@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import '../models/models.dart';
-import '../services/api_service.dart';
 import '../services/app_data_cache.dart';
 import '../services/direct_sql_service.dart';
 import '../utils/currency_formatter.dart';
@@ -90,7 +89,6 @@ class _TransactionScreenState extends State<TransactionScreen> {
   String _selectedFilter = 'All';
   DateTime _currentDate = DateTime.now();
   String _selectedAccount = 'All';
-  final _api = ApiService();
 
   bool _loading = true;
   bool _deleting = false;
@@ -1156,7 +1154,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
     if (confirm == true) {
       setState(() => _deleting = true);
       try {
-        await _api.deleteTransaction(tx.id);
+        await DirectSqlService.deleteTransaction(tx.id);
         final month = DateFormat('MMM').format(_currentDate).toLowerCase();
         final year = _currentDate.year.toString();
         AppDataCache().removeTransaction(month, year, tx.id);

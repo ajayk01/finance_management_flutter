@@ -7,10 +7,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import '../main.dart';
-import '../models/models.dart';
 import '../screens/add_transaction_screen.dart';
 import '../screens/cc_statement_screen.dart';
 import 'api_service.dart';
+import 'direct_sql_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -304,17 +304,15 @@ class NotificationService {
 
     try {
       // Add timeout to prevent infinite loading
-      final data = await ApiService().getTransactionById(tnxId).timeout(
+      final tx = await DirectSqlService.getTransactionById(tnxId).timeout(
         const Duration(seconds: 10),
         onTimeout: () {
           throw TimeoutException('Failed to fetch transaction data within 10 seconds');
         },
       );
-      
-      final txJson = data['transaction'] ?? data;
-      final tx = TransactionModel.fromJson(
-        txJson is Map<String, dynamic> ? txJson : data,
-      );
+      if (tx == null) {
+        throw StateError('Transaction not found');
+      }
       
       // Check if context still exists before dismissing
       if (nav.mounted) {

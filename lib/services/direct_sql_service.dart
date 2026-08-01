@@ -645,6 +645,150 @@ WHERE ID = :id
         await service.executeWriteQuery(sql, params);
     }
 
+    static Future<void> deleteTransaction(String transactionId) async {
+        final parsedId = int.tryParse(transactionId);
+        if (parsedId == null) {
+            throw ArgumentError('Invalid transactionId: $transactionId');
+        }
+
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        await service.executeWriteQuery(
+            'DELETE FROM SplitwiseTransactions WHERE TRANSACTION_ID = :id',
+            {'id': parsedId},
+        );
+        await service.executeWriteQuery(
+            'DELETE FROM Transactions WHERE ID = :id',
+            {'id': parsedId},
+        );
+    }
+
+    static Future<void> deleteTransactions(List<String> transactionIds) async {
+        final parsedIds = transactionIds
+            .map((id) => int.tryParse(id))
+            .where((id) => id != null)
+            .cast<int>()
+            .toSet()
+            .toList();
+
+        if (parsedIds.isEmpty) {
+            return;
+        }
+
+        final inClause = parsedIds.join(',');
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        await service.executeWriteQuery(
+            'DELETE FROM SplitwiseTransactions WHERE TRANSACTION_ID IN ($inClause)',
+        );
+        await service.executeWriteQuery(
+            'DELETE FROM Transactions WHERE ID IN ($inClause)',
+        );
+    }
+
+    static Future<TransactionModel?> getTransactionById(String transactionId) async {
+        final parsedId = int.tryParse(transactionId);
+        if (parsedId == null) {
+            throw ArgumentError('Invalid transactionId: $transactionId');
+        }
+
+        final sql = "SELECT "
+            "t.ID AS id, "
+            "t.DATE AS date, "
+            "t.NOTES AS description, "
+            "t.AMOUNT AS amount, "
+            "t.TRANSCATION_TYPE AS transaction_type, "
+            "t.CATEGORY_ID AS category_id, "
+            "t.SUB_CATEGORY_ID AS sub_category_id, "
+            "t.FROM_ACCOUNT_ID AS from_account_id, "
+            "t.TO_ACCOUNT_ID AS to_account_id, "
+            "c.CATEGORY_NAME AS category_name, "
+            "s.SUB_CATEGORY_NAME AS sub_category_name, "
+            "fa.ACCOUNT_NAME AS from_account_name, "
+            "ta.ACCOUNT_NAME AS to_account_name "
+            "FROM Transactions t "
+            "LEFT JOIN Category c ON c.ID = t.CATEGORY_ID "
+            "LEFT JOIN SubCategory s ON s.ID = t.SUB_CATEGORY_ID "
+            "LEFT JOIN Accounts fa ON fa.ID = t.FROM_ACCOUNT_ID "
+            "LEFT JOIN Accounts ta ON ta.ID = t.TO_ACCOUNT_ID "
+            "WHERE t.ID = $parsedId "
+            "LIMIT 1";
+
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        final results = await service.executeReadQuery(sql);
+        final rows = (results['rows'] as List? ?? []);
+        if (rows.isEmpty) {
+            return null;
+        }
+
+        final splitwiseSql = "SELECT "
+            "st.TRANSACTION_ID AS transaction_id, "
+            "st.SPLITWISE_TRANSACTION_ID AS splitwise_transaction_id, "
+            "st.SPLITED_AMOUNT AS splited_amount, "
+            "sf.ID AS db_friend_id, "
+            "sf.SPLITWISE_FRIEND_ID AS splitwise_friend_id, "
+            "sf.NAME AS friend_name "
+            "FROM SplitwiseTransactions st "
+            "JOIN SplitwiseFriends sf ON sf.ID = st.FRIEND_ID "
+            "WHERE st.TRANSACTION_ID = $parsedId "
+            "ORDER BY sf.NAME";
+
+        final splitwiseResults = await service.executeReadQuery(splitwiseSql);
+        final splitwiseRows = (splitwiseResults['rows'] as List? ?? []);
+        final splitwiseDetails = splitwiseRows.map((splitwiseRow) {
+            final splitwiseMap = Map<String, dynamic>.from(splitwiseRow as Map);
+            final splitwiseFriendId = splitwiseMap['splitwise_friend_id']?.toString();
+            final dbFriendId = splitwiseMap['db_friend_id']?.toString();
+            return {
+                'splitwiseTransactionId': splitwiseMap['splitwise_transaction_id']?.toString() ?? '',
+                'friendId': splitwiseFriendId ?? dbFriendId ?? '',
+                'userId': splitwiseFriendId ?? dbFriendId ?? '',
+                'splitwiseUserId': splitwiseFriendId ?? dbFriendId ?? '',
+                'friendName': splitwiseMap['friend_name']?.toString() ?? '',
+                'splitedAmount': _toDouble(splitwiseMap['splited_amount']),
+            };
+        }).toList();
+
+        final splitwiseUserIds = splitwiseDetails
+            .map((detail) => (detail['splitwiseUserId'] ?? detail['friendId'])?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>()
+            .toList();
+
+        final rowMap = Map<String, dynamic>.from(rows.first as Map);
+        final type = _mapTransactionType(rowMap['transaction_type']);
+        final isTransfer = type == 'transfer';
+        final isInvestment = type == 'investment';
+
+        return TransactionModel.fromJson({
+            'id': rowMap['id'],
+            'date': rowMap['date'],
+            'description': rowMap['description'] ?? '',
+            'amount': rowMap['amount'],
+            'type': type,
+            'category': isTransfer
+                ? 'Transfer'
+                : (rowMap['category_name']?.toString() ?? (isInvestment ? 'Investment' : null)),
+            'subCategory': isTransfer ? rowMap['to_account_name'] : rowMap['sub_category_name'],
+            'accountId': rowMap['from_account_id']?.toString(),
+            'accountName': rowMap['from_account_name'],
+            'categoryId': rowMap['category_id']?.toString(),
+            'subCategoryId': rowMap['sub_category_id']?.toString(),
+            'investmentAccountId': isInvestment ? rowMap['to_account_id']?.toString() : null,
+            'investmentAccountName': isInvestment ? rowMap['to_account_name'] : null,
+            'splitwiseDetails': splitwiseDetails,
+            'splitwiseUserIds': splitwiseUserIds,
+            'includeSplitwise': splitwiseDetails.isNotEmpty,
+        });
+    }
+
     static Future<ActiveAccountsResult> getAllActiveAccounts() async
     {
         String sql = "SELECT ID,ACCOUNT_NAME,CURRENT_BALANCE, INITIAL_BALANCE, ACCOUNT_TYPE, IMG FROM Accounts WHERE IS_ACTIVE = 1";
