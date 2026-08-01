@@ -175,6 +175,23 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           .where((e) => e is Map && e['friendName'] != null)
           .map((e) => e['friendName'].toString())
           .toList();
+
+      for (final entry in sw.whereType<Map>()) {
+        final amount = double.tryParse(
+          (entry['splitedAmount'] ?? entry['splitAmount'] ?? '').toString(),
+        );
+        if (amount == null || amount <= 0) continue;
+        final fid =
+            (entry['friendId'] ?? entry['userId'] ?? entry['splitwiseUserId'])
+                ?.toString();
+        final fname = entry['friendName']?.toString();
+        if (fid != null && fid.isNotEmpty) {
+          _pendingSplitwiseAmountsByMemberId[fid] = amount;
+        }
+        if (fname != null && fname.isNotEmpty) {
+          _pendingSplitwiseAmountsByFriendName[fname] = amount;
+        }
+      }
     }
 
     // Fallback: use top-level splitwise fields from the transaction
@@ -197,6 +214,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   String? _pendingSplitwiseGroupId;
   List<String> _pendingSplitwiseMemberIds = [];
   List<String> _pendingSplitwiseFriendNames = [];
+  final Map<String, double> _pendingSplitwiseAmountsByMemberId = {};
+  final Map<String, double> _pendingSplitwiseAmountsByFriendName = {};
 
   void _applyFormData({
     required List<Category> cats,
@@ -276,10 +295,27 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               }
             }
           }
+
+          for (final member in matchedGroup.members) {
+            if (!_selectedPeople.contains(member.name)) continue;
+            final prefillAmount = _pendingSplitwiseAmountsByMemberId[member.id] ??
+                _pendingSplitwiseAmountsByMemberId[member.friendId] ??
+                _pendingSplitwiseAmountsByFriendName[member.name];
+            if (prefillAmount == null || prefillAmount <= 0) continue;
+            final controller = _customAmountControllers.putIfAbsent(
+              member.id,
+              () => TextEditingController(),
+            );
+            controller.text = prefillAmount % 1 == 0
+                ? prefillAmount.toStringAsFixed(0)
+                : prefillAmount.toStringAsFixed(2);
+          }
         }
         _pendingSplitwiseGroupId = null;
         _pendingSplitwiseMemberIds = [];
         _pendingSplitwiseFriendNames = [];
+        _pendingSplitwiseAmountsByMemberId.clear();
+        _pendingSplitwiseAmountsByFriendName.clear();
       }
 
       _loading = false;
@@ -402,6 +438,30 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     return ['Sayuti', 'Zahra', 'Ahmad', 'Rina', 'Dian'];
   }
 
+  SplitwiseGroup? get _selectedSplitwiseGroup {
+    if (_splitwiseGroups.isEmpty || _selectedGroup.isEmpty) {
+      return null;
+    }
+    return _splitwiseGroups.firstWhere(
+      (g) => g.name == _selectedGroup,
+      orElse: () => _splitwiseGroups.first,
+    );
+  }
+
+  List<SplitwiseMember> get _selectedSplitwiseMembers {
+    final group = _selectedSplitwiseGroup;
+    if (group == null) return const [];
+    return group.members
+        .where((m) => _selectedPeople.contains(m.name))
+        .toList();
+  }
+
+  double get _equalSplitAmount {
+    final totalAmount = double.tryParse(_amountController.text.trim()) ?? 0;
+    if (_selectedPeople.isEmpty) return 0;
+    return totalAmount / _selectedPeople.length;
+  }
+
   double get _budgetPercent {
     final card = _creditCards.where((c) => c.name == _selectedAccount).firstOrNull;
     if (card != null && card.totalLimit > 0) {
@@ -490,8 +550,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       if (_splitType == 'Custom') {
         final totalAmount = double.tryParse(_amountController.text) ?? 0;
         double allocated = 0;
-        for (final c in _customAmountControllers.values) {
-          allocated += double.tryParse(c.text.trim()) ?? 0;
+        for (final member in _selectedSplitwiseMembers) {
+          final controller = _customAmountControllers[member.id];
+          allocated += double.tryParse(controller?.text.trim() ?? '') ?? 0;
         }
         if (allocated <= 0) {
           _showValidationError('Please enter custom amounts for each person');
@@ -580,10 +641,15 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           body['splitType'] = _splitType.toLowerCase();
           if (_splitType == 'Custom') {
             final customAmounts = <String, double>{};
-            for (final entry in _customAmountControllers.entries) {
-              final val = double.tryParse(entry.value.text.trim());
+            final selectedMembers = group.members
+                .where((m) => _selectedPeople.contains(m.name))
+                .toList();
+            for (final member in selectedMembers) {
+              final val = double.tryParse(
+                _customAmountControllers[member.id]?.text.trim() ?? '',
+              );
               if (val != null && val > 0) {
-                customAmounts[entry.key] = val;
+                customAmounts[member.id] = val;
               }
             }
             if (customAmounts.isNotEmpty) {
@@ -673,9 +739,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             customAmounts: _showSplitwise && _splitType == 'Custom'
                 ? () {
                     final m = <String, double>{};
-                    for (final entry in _customAmountControllers.entries) {
-                      final val = double.tryParse(entry.value.text.trim());
-                      if (val != null && val > 0) m[entry.key] = val;
+                    final selectedMembers = (_selectedSplitwiseGroup?.members ?? const <SplitwiseMember>[])
+                        .where((member) => _selectedPeople.contains(member.name))
+                        .toList();
+                    for (final member in selectedMembers) {
+                      final val = double.tryParse(
+                        _customAmountControllers[member.id]?.text.trim() ?? '',
+                      );
+                      if (val != null && val > 0) m[member.id] = val;
                     }
                     return m.isNotEmpty ? m : null;
                   }()
@@ -1887,7 +1958,16 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   'Select Group',
                   _splitGroups,
                   _selectedGroup,
-                  (val) => setState(() => _selectedGroup = val),
+                  (val) => setState(() {
+                    if (_selectedGroup != val) {
+                      for (final c in _customAmountControllers.values) {
+                        c.dispose();
+                      }
+                      _customAmountControllers.clear();
+                      _selectedPeople.clear();
+                    }
+                    _selectedGroup = val;
+                  }),
                 ),
               );
             },
@@ -1992,6 +2072,16 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                                 onTap: () {
                                   setState(() {
                                     _selectedPeople.remove(p);
+                                    final group = _selectedSplitwiseGroup;
+                                    if (group != null) {
+                                      final member = group.members
+                                          .where((m) => m.name == p)
+                                          .firstOrNull;
+                                      if (member != null) {
+                                        _customAmountControllers.remove(member.id)
+                                            ?.dispose();
+                                      }
+                                    }
                                   });
                                 },
                                 child: const Icon(Icons.close,
@@ -2072,11 +2162,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             }).toList(),
           ),
 
-          // ── Custom Amount Inputs ──
-          if (_splitType == 'Custom' && _selectedPeople.isNotEmpty) ...[
+          // ── Amount Per Friend ──
+          if (_selectedPeople.isNotEmpty) ...[
             const SizedBox(height: 14),
             Text(
-              'Custom Amounts',
+              'Amount Per Friend',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -2084,27 +2174,27 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            ..._selectedPeople.map((person) {
-              final group = _splitwiseGroups.firstWhere(
-                (g) => g.name == _selectedGroup,
-                orElse: () => _splitwiseGroups.first,
-              );
-              final member = group.members.firstWhere(
-                (m) => m.name == person,
-                orElse: () => group.members.first,
-              );
-              _customAmountControllers.putIfAbsent(
-                member.id,
-                () => TextEditingController(),
-              );
+            ..._selectedSplitwiseMembers.map((member) {
+              final person = member.name;
+              if (_splitType == 'Custom') {
+                _customAmountControllers.putIfAbsent(
+                  member.id,
+                  () => TextEditingController(),
+                );
+              }
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
                   children: [
                     CircleAvatar(
                       radius: 14,
-                      backgroundColor: const Color(0xFF5BC5A7).withValues(alpha: 0.1),
-                      child: const Icon(Icons.person, size: 14, color: Color(0xFF5BC5A7)),
+                      backgroundColor:
+                          const Color(0xFF5BC5A7).withValues(alpha: 0.1),
+                      child: const Icon(
+                        Icons.person,
+                        size: 14,
+                        color: Color(0xFF5BC5A7),
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -2122,43 +2212,71 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       flex: 2,
-                      child: TextFormField(
-                        controller: _customAmountControllers[member.id],
-                        keyboardType: TextInputType.number,
-                        onChanged: (_) => setState(() {}),
-                        decoration: InputDecoration(
-                          hintText: '0',
-                          hintStyle: TextStyle(color: Colors.grey.shade400),
-                          prefixText: '₹ ',
-                          prefixStyle: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF1E293B),
-                          ),
-                          filled: true,
-                          fillColor: const Color(0xFFF8F8FB),
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 10),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(color: Colors.grey.shade200),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(color: Colors.grey.shade200),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(
-                                color: Color(0xFF5BC5A7), width: 1.5),
-                          ),
-                        ),
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: Color(0xFF1E293B),
-                        ),
-                      ),
+                      child: _splitType == 'Custom'
+                          ? TextFormField(
+                              controller: _customAmountControllers[member.id],
+                              keyboardType: TextInputType.number,
+                              onChanged: (_) => setState(() {}),
+                              decoration: InputDecoration(
+                                hintText: '0',
+                                hintStyle:
+                                    TextStyle(color: Colors.grey.shade400),
+                                prefixText: '₹ ',
+                                prefixStyle: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF1E293B),
+                                ),
+                                filled: true,
+                                fillColor: const Color(0xFFF8F8FB),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide:
+                                      BorderSide(color: Colors.grey.shade200),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide:
+                                      BorderSide(color: Colors.grey.shade200),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFF5BC5A7),
+                                    width: 1.5,
+                                  ),
+                                ),
+                              ),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: Color(0xFF1E293B),
+                              ),
+                            )
+                          : Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8F8FB),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.grey.shade200),
+                              ),
+                              child: Text(
+                                '₹ ${_equalSplitAmount.toStringAsFixed(2)}',
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF1E293B),
+                                ),
+                              ),
+                            ),
                     ),
                   ],
                 ),
@@ -2167,21 +2285,39 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             const SizedBox(height: 10),
             Builder(builder: (_) {
               final totalAmount = double.tryParse(_amountController.text) ?? 0;
-              double allocated = 0;
-              for (final c in _customAmountControllers.values) {
-                allocated += double.tryParse(c.text.trim()) ?? 0;
-              }
+              final allocated = _splitType == 'Custom'
+                  ? _selectedSplitwiseMembers.fold<double>(
+                      0,
+                      (sum, member) =>
+                          sum +
+                          (double.tryParse(
+                                _customAmountControllers[member.id]
+                                        ?.text
+                                        .trim() ??
+                                    '',
+                              ) ??
+                              0),
+                    )
+                  : totalAmount;
               final remaining = totalAmount - allocated;
               return Column(
                 children: [
-                  _buildSummaryRow('Total Amount:', '₹${totalAmount.toStringAsFixed(0)}', const Color(0xFF1E293B)),
+                  _buildSummaryRow(
+                    'Total Amount:',
+                    '₹${totalAmount.toStringAsFixed(0)}',
+                    const Color(0xFF1E293B),
+                  ),
                   const SizedBox(height: 4),
-                  _buildSummaryRow('Allocated:', '₹${allocated.toStringAsFixed(2)}', const Color(0xFF1E293B)),
+                  _buildSummaryRow(
+                    'Allocated:',
+                    '₹${allocated.toStringAsFixed(2)}',
+                    const Color(0xFF1E293B),
+                  ),
                   const SizedBox(height: 4),
                   _buildSummaryRow(
                     'Remaining:',
                     '₹${remaining.toStringAsFixed(2)}',
-                    remaining == 0
+                    remaining.abs() <= 0.01
                         ? const Color(0xFF22C55E)
                         : remaining < 0
                             ? const Color(0xFFEF4444)
@@ -2331,6 +2467,38 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   color: Color(0xFF1E293B),
                 ),
               ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _selectedPeople
+                          ..clear()
+                          ..addAll(_splitPeople);
+                      });
+                      setSheetState(() {});
+                    },
+                    child: const Text('Select All'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        final group = _selectedSplitwiseGroup;
+                        if (group != null) {
+                          for (final member in group.members) {
+                            _customAmountControllers.remove(member.id)
+                                ?.dispose();
+                          }
+                        }
+                        _selectedPeople.clear();
+                      });
+                      setSheetState(() {});
+                    },
+                    child: const Text('Clear'),
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
               Flexible(
                 child: ListView(
@@ -2374,6 +2542,16 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                         setState(() {
                           if (isSel) {
                             _selectedPeople.remove(person);
+                            final group = _selectedSplitwiseGroup;
+                            if (group != null) {
+                              final member = group.members
+                                  .where((m) => m.name == person)
+                                  .firstOrNull;
+                              if (member != null) {
+                                _customAmountControllers.remove(member.id)
+                                    ?.dispose();
+                              }
+                            }
                           } else {
                             _selectedPeople.add(person);
                           }
