@@ -5,6 +5,7 @@ import 'add_category_screen.dart';
 import 'add_credit_cap_screen.dart';
 import 'add_subcategory_screen.dart';
 import 'analytics_screen.dart';
+import 'backup_schedule_screen.dart';
 import 'cc_statement_screen.dart';
 import 'local_server_screen.dart';
 import 'pay_cc_bill_screen.dart';
@@ -116,6 +117,18 @@ class ProfileScreen extends StatelessWidget {
               icon: Icons.credit_card_outlined,
               title: 'Upload CC Statement',
               onTap: () => _pickAndOpenStatement(context),
+            ),
+            _buildOptionTile(
+              icon: Icons.schedule_outlined,
+              title: 'Backup Schedule',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const BackupScheduleScreen(),
+                  ),
+                );
+              },
             ),
           ],
         ),

@@ -1,13 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
+import 'services/backup_scheduler_service.dart';
 import 'screens/splash_screen.dart';
 import 'screens/home_screen.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+  await AndroidAlarmManager.initialize();
+  await BackupSchedulerService.instance.initialize();
+
   // DON'T WAIT for initialization - show splash immediately
   runApp(const FinanceApp());
 }
