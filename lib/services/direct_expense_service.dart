@@ -117,10 +117,10 @@ class DirectExpenseService {
         if (capId != null &&
             capId.trim().isNotEmpty &&
             parsedAccount.type == 'Credit Card') {
-          await _insertCreditCardTransaction(
+          await createCreditCardTransaction(
             service: service,
             transactionId: transactionId,
-            creditCardId: parsedAccount.id,
+            creditCardId: parsedAccount.id.toString(),
             capId: capId,
             amount: amount,
           );
@@ -232,10 +232,10 @@ WHERE ID = :id AND TRANSCATION_TYPE = :transactionType
           );
 
           if (capId != null && capId.trim().isNotEmpty) {
-            await _insertCreditCardTransaction(
+            await createCreditCardTransaction(
               service: service,
               transactionId: transactionId,
-              creditCardId: parsedAccount.id,
+              creditCardId: parsedAccount.id.toString(),
               capId: capId,
               amount: amount,
             );
@@ -569,14 +569,18 @@ INSERT INTO SplitwiseTransactions (
     );
   }
 
-  static Future<void> _insertCreditCardTransaction({
+  static Future<void> createCreditCardTransaction({
     required MySqlService service,
     required int transactionId,
-    required int creditCardId,
+    required String creditCardId,
     required String capId,
     required double amount,
   }) async {
+    final parsedCreditCardId = int.tryParse(creditCardId);
     final parsedCapId = int.tryParse(capId);
+    if (parsedCreditCardId == null || parsedCreditCardId <= 0) {
+      throw ArgumentError('Invalid creditCardId: $creditCardId');
+    }
     if (parsedCapId == null || parsedCapId <= 0) {
       throw ArgumentError('Invalid capId: $capId');
     }
@@ -586,14 +590,17 @@ INSERT INTO SplitwiseTransactions (
     );
     final rows = (capRowsResult['rows'] as List? ?? const <dynamic>[]);
     if (rows.isEmpty) {
+      print(
+        '⚠️ Cap not found for ID $parsedCapId, skipping CreditCardTransactions insert',
+      );
       return;
     }
 
     final rowMap = Map<String, dynamic>.from(rows.first as Map);
     final capPercentage = _toDouble(rowMap['CAP_PERCENTAGE']);
     final rewardPerAmount = _toDouble(rowMap['REWARD_PER_AMOUNT']);
-    final denominator = rewardPerAmount == 0 ? 100 : rewardPerAmount;
-    final rewards = (amount.truncate() * capPercentage) / denominator;
+    final rewardUnit = rewardPerAmount <= 0 ? 100 : rewardPerAmount;
+    final rewards = (amount / rewardUnit).floor() * capPercentage;
 
     await service.executeWriteQuery(
       '''
@@ -611,10 +618,14 @@ INSERT INTO CreditCardTransactions (
 ''',
       {
         'transactionId': transactionId,
-        'creditCardId': creditCardId,
+        'creditCardId': parsedCreditCardId,
         'capId': parsedCapId,
         'rewards': rewards,
       },
+    );
+
+    print(
+      '✅ Created CreditCardTransactions entry for cap $parsedCapId, rewards: $rewards',
     );
   }
 

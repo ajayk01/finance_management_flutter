@@ -144,11 +144,6 @@ class ApiService {
 
   // ─── 12. Credit Card Caps ─────────────────────────────────
 
-  Future<Map<String, dynamic>> getCreditCardCaps({String? creditCardId}) {
-    final params = <String, String>{};
-    if (creditCardId != null) params['creditCardId'] = creditCardId;
-    return _get('/credit-card-caps', params.isEmpty ? null : params);
-  }
 
   Future<Map<String, dynamic>> createCreditCardCap({
     required String creditCardId,

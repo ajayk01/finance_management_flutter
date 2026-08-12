@@ -38,6 +38,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   String? _subCategoryError;
   String _selectedFromAccount = '';
   String _selectedToAccount = '';
+  String _selectedCreditCardCapId = '';
   String? _fromAccountError;
   String? _toAccountError;
 
@@ -247,6 +248,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         _selectedGroup = groups.first.name;
       }
 
+      _syncSelectedCapWithAccount();
+
       // Resolve pending splitwise prefill
       if ((_pendingSplitwiseGroupId != null || _pendingSplitwiseMemberIds.isNotEmpty || _pendingSplitwiseFriendNames.isNotEmpty) && groups.isNotEmpty) {
         SplitwiseGroup? matchedGroup;
@@ -393,6 +396,37 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     for (final a in _investmentAccounts) { items.add(a.name); }
     if (items.isEmpty) return ['Investment Account'];
     return items;
+  }
+
+  CreditCardAccount? get _selectedCreditCardAccount {
+    return _creditCards.where((c) => c.name == _selectedAccount).firstOrNull;
+  }
+
+  List<CreditCardCap> get _availableCreditCardCaps {
+    final card = _selectedCreditCardAccount;
+    if (card == null) return const <CreditCardCap>[];
+    return _creditCardCaps.where((cap) => cap.creditCardId == card.id).toList();
+  }
+
+  CreditCardCap? get _selectedCreditCardCap {
+    if (_selectedCreditCardCapId.isEmpty) return null;
+    return _availableCreditCardCaps
+        .where((cap) => cap.id == _selectedCreditCardCapId)
+        .firstOrNull;
+  }
+
+  void _syncSelectedCapWithAccount() {
+    final caps = _availableCreditCardCaps;
+    if (caps.isEmpty) {
+      _selectedCreditCardCapId = '';
+      return;
+    }
+
+    final isSelectedCapAvailable =
+        caps.any((cap) => cap.id == _selectedCreditCardCapId);
+    if (!isSelectedCapAvailable) {
+      _selectedCreditCardCapId = caps.first.id;
+    }
   }
 
 
@@ -653,6 +687,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               final card = _creditCards.firstWhere((c) => c.name == _selectedAccount);
               body['account'] = {'type': 'Credit Card', 'id': card.id};
               body['accountId'] = card.id;
+              if (_selectedCreditCardCapId.trim().isNotEmpty) {
+                body['capId'] = _selectedCreditCardCapId;
+              }
             } else {
               final bank = _bankAccounts.firstWhere(
                 (b) => b.name == _selectedAccount,
@@ -660,6 +697,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               );
               body['account'] = {'type': 'Bank', 'id': bank.id};
               body['accountId'] = bank.id;
+              body.remove('capId');
             }
             await DirectExpenseService.updateExpense(
               id: body['id'] as String,
@@ -784,6 +822,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             description: _descController.text,
             categoryId: catObj.id,
             subCategoryId: subCatObj.id,
+            capId: _isCreditCard && _selectedCreditCardCapId.trim().isNotEmpty
+                ? _selectedCreditCardCapId
+                : null,
             includeSplitwise: _showSplitwise,
             splitwiseGroupId: _showSplitwise && _splitwiseGroups.isNotEmpty
                 ? _splitwiseGroups.firstWhere((g) => g.name == _selectedGroup, orElse: () => _splitwiseGroups.first).id
@@ -1089,7 +1130,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
                 // ── Credit Cap ──
                 if (_isCreditCard) ...[
-                  _buildCreditCapAlert(),
+                  _buildCreditCardCapField(),
                   const SizedBox(height: 16),
                 ],
 
@@ -1315,7 +1356,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
   }
 
-  bool get _isCreditCard => _selectedAccount.contains('••');
+  bool get _isCreditCard =>
+      _creditCards.any((c) => c.name == _selectedAccount) ||
+      _selectedAccount.contains('••');
 
   // ── Text Field (matching Add Account style) ──
   Widget _buildTextField({
@@ -1537,44 +1580,67 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
   }
 
-  // ── Credit Cap Alert ──
-  Widget _buildCreditCapAlert() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF3E0),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFFFCC80)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.credit_score, size: 18, color: Color(0xFFF57C00)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Credit Cap: ₹5,000',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1E293B),
-                  ),
-                ),
-                Text(
-                  'Available: ₹3,240 • Used: ₹1,760',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-              ],
-            ),
+  // ── Credit Card Cap ──
+  Widget _buildCreditCardCapField() {
+    final caps = _availableCreditCardCaps;
+    final selectedCap = _selectedCreditCardCap;
+    final hasCaps = caps.isNotEmpty;
+
+    final remainingAmount = selectedCap?.remainingAmount ?? 0;
+    final usedAmount = selectedCap?.capCurrentAmount ?? 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildTappableField(
+          label: 'Credit Card Cap',
+          value: selectedCap?.capName ?? 'No cap available',
+          icon: Icons.credit_score,
+          onTap: hasCaps ? _showCreditCardCapPicker : null,
+        ),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF3E0),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFFFCC80)),
           ),
-        ],
-      ),
+          child: Row(
+            children: [
+              const Icon(Icons.credit_score, size: 18, color: Color(0xFFF57C00)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      hasCaps
+                          ? 'Cap Total: ₹${(selectedCap?.capTotalAmount ?? 0).toStringAsFixed(2)}'
+                          : 'No caps configured for this card',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    Text(
+                      hasCaps
+                          ? 'Available: ₹${remainingAmount.toStringAsFixed(2)} • Used: ₹${usedAmount.toStringAsFixed(2)}'
+                          : 'Add caps in Credit Card Caps setup',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -1698,11 +1764,116 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     setState(() {
                       _selectedAccount = a;
                       _accountError = null;
+                      _syncSelectedCapWithAccount();
                     });
                     Navigator.pop(ctx);
                   },
                 );
               }).toList(),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showCreditCardCapPicker() {
+    final caps = _availableCreditCardCaps;
+    if (caps.isEmpty) return;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.6,
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Select Credit Card Cap',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1E293B),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: caps.map((cap) {
+                    final selected = _selectedCreditCardCapId == cap.id;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? const Color(0xFF3B3BF9).withValues(alpha: 0.1)
+                              : const Color(0xFFF3F4F6),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          Icons.credit_score,
+                          size: 20,
+                          color: selected
+                              ? const Color(0xFF3B3BF9)
+                              : Colors.grey.shade600,
+                        ),
+                      ),
+                      title: Text(
+                        cap.capName,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight:
+                              selected ? FontWeight.w600 : FontWeight.w500,
+                          color: selected
+                              ? const Color(0xFF3B3BF9)
+                              : const Color(0xFF1E293B),
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Remaining: ₹${cap.remainingAmount.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                      trailing: selected
+                          ? const Icon(Icons.check_circle,
+                              color: Color(0xFF3B3BF9), size: 22)
+                          : Icon(Icons.circle_outlined,
+                              color: Colors.grey.shade300, size: 22),
+                      onTap: () {
+                        setState(() {
+                          _selectedCreditCardCapId = cap.id;
+                        });
+                        Navigator.pop(ctx);
+                      },
+                    );
+                  }).toList(),
                 ),
               ),
             ],

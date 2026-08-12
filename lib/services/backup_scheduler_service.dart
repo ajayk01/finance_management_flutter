@@ -6,6 +6,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'google_drive_backup_service.dart';
@@ -22,6 +23,10 @@ const String _lastErrorKey = 'backup_schedule_last_error';
 const String _lastBackupPathKey = 'backup_schedule_last_backup_path';
 const String _nextRunAtListKey = 'backup_schedule_next_run_at_list';
 const String _pendingUploadPathsKey = 'backup_schedule_pending_upload_paths';
+const String _backupStatusChannelId = 'backup_status_channel';
+const String _backupStatusChannelName = 'Backup Status Notifications';
+const String _backupStatusChannelDescription =
+  'Shows backup completion success or failure.';
 
 @pragma('vm:entry-point')
 Future<void> backupAlarmCallback() async {
@@ -55,6 +60,8 @@ class BackupSchedulerService {
   BackupSchedulerService._();
 
   static final BackupSchedulerService instance = BackupSchedulerService._();
+  static final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
   Future<void>? _initializing;
@@ -266,6 +273,11 @@ class BackupSchedulerService {
         await prefs.remove(_lastErrorKey);
       }
 
+      await _showBackupCompletionNotification(
+        success: true,
+        message: uploadMessage,
+      );
+
       return true;
     } catch (error) {
       if (writeStatus) {
@@ -273,7 +285,63 @@ class BackupSchedulerService {
         await prefs.setString(_lastStatusKey, 'Backup failed');
         await prefs.setString(_lastErrorKey, error.toString());
       }
+
+      await _showBackupCompletionNotification(
+        success: false,
+        message: error.toString(),
+      );
+
       return false;
+    }
+  }
+
+  Future<void> _showBackupCompletionNotification({
+    required bool success,
+    required String message,
+  }) async {
+    try {
+      const initializationSettings = InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        iOS: DarwinInitializationSettings(),
+      );
+      await _localNotifications.initialize(initializationSettings);
+
+      const channel = AndroidNotificationChannel(
+        _backupStatusChannelId,
+        _backupStatusChannelName,
+        description: _backupStatusChannelDescription,
+        importance: Importance.high,
+      );
+
+      await _localNotifications
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
+
+      final title = success ? 'Backup completed' : 'Backup failed';
+
+      await _localNotifications.show(
+        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        title,
+        message,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _backupStatusChannelId,
+            _backupStatusChannelName,
+            channelDescription: _backupStatusChannelDescription,
+            importance: Importance.high,
+            priority: Priority.high,
+            icon: '@mipmap/ic_launcher',
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Failed to show backup completion notification: $e');
     }
   }
 
