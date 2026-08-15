@@ -5,8 +5,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
 import '../services/backup_scheduler_service.dart';
 import '../services/api_service.dart';
-import '../services/google_drive_backup_service.dart';
-import '../services/mysql_service.dart';
 import '../services/notification_service.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -28,7 +26,6 @@ class _SplashScreenState extends State<SplashScreen> {
       // Load environment variables (required first)
       await dotenv.load();
       await BackupSchedulerService.instance.ensureSchedule();
-      unawaited(_runStartupBackupTest());
 
       await _initFirebase();
       await _initNotifications();
@@ -83,50 +80,6 @@ class _SplashScreenState extends State<SplashScreen> {
       if (mounted) {
         Navigator.of(context).pushReplacementNamed('/home');
       }
-    }
-  }
-
-  Future<String?> _runStartupBackupTest() async {
-    try {
-      final backupPath = await MySqlService().backupDatabaseWithMysqldump();
-      debugPrint('[SplashScreen] Startup backup saved to: $backupPath');
-
-      unawaited(_uploadBackupInBackground(backupPath));
-
-      return backupPath;
-    } catch (e) {
-      debugPrint('[SplashScreen] Startup backup failed: $e');
-      return null;
-    }
-  }
-
-  Future<void> _uploadBackupInBackground(String backupPath) async {
-    await Future<void>.delayed(Duration.zero);
-
-    try {
-      final driveService = GoogleDriveBackupService.instance;
-      try {
-        final uploadResult = await driveService.uploadBackupFile(
-          filePath: backupPath,
-          allowInteractiveSignIn: false,
-        );
-        debugPrint(
-          '[SplashScreen] Startup backup uploaded to Google Drive: '
-              'id=${uploadResult['id']}, name=${uploadResult['name']}',
-        );
-      } catch (_) {
-        await driveService.authorizeInteractive();
-        final uploadResult = await driveService.uploadBackupFile(
-          filePath: backupPath,
-          allowInteractiveSignIn: false,
-        );
-        debugPrint(
-          '[SplashScreen] Startup backup uploaded to Google Drive: '
-              'id=${uploadResult['id']}, name=${uploadResult['name']}',
-        );
-      }
-    } catch (e) {
-      debugPrint('[SplashScreen] Google Drive upload failed: $e');
     }
   }
 
@@ -224,7 +177,6 @@ class _SplashScreenState extends State<SplashScreen> {
               ),
             ),
             const SizedBox(height: 32),
-            // Loading indicator
             SizedBox(
               width: 40,
               height: 40,

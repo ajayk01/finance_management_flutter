@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show max;
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:mysql_client/mysql_client.dart';
@@ -108,7 +109,7 @@ class MySqlService {
     );
 
     _conn = connection;
-    await connection.connect();
+    await connection.connect().timeout(const Duration(seconds: 30));
   }
 
   Future<void> disconnect() async {
@@ -428,6 +429,7 @@ class MySqlService {
     bool includeRoutines = true,
     bool includeTriggers = true,
     bool includeEvents = true,
+    void Function(double progress, String tableName)? onProgress,
   }) async {
     final resolvedConfig = config ?? MySqlConfig.fromDotEnv();
     final missing = resolvedConfig.missingKeys();
@@ -468,13 +470,39 @@ class MySqlService {
       }
 
       final tableNameColumn = tablesResult.cols.first.name;
+      final tableRows = tablesResult.rows.toList();
+
+      // Row-count weighting is only needed when a progress callback is provided.
+      final approxRowCounts = <String, int>{};
+      if (onProgress != null) {
+        final statsResult = await conn.execute(
+          "SELECT TABLE_NAME, COALESCE(TABLE_ROWS, 0) AS row_count "
+          "FROM information_schema.TABLES "
+          "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'",
+        );
+        for (final row in statsResult.rows) {
+          final name = row.typedColByName<String>('TABLE_NAME') ?? '';
+          final raw = row.typedColByName<String>('row_count') ?? '0';
+          approxRowCounts[name] = int.tryParse(raw) ?? 0;
+        }
+      }
+      final totalWeight = tableRows.fold<int>(
+        0,
+        (sum, row) {
+          final name =
+              row.typedColByName<String>(tableNameColumn)?.trim() ?? '';
+          return sum + max(1, approxRowCounts[name] ?? 0);
+        },
+      );
+      var cumulativeWeight = 0;
+
       final buffer = StringBuffer()
         ..writeln('-- Database: ${resolvedConfig.databaseName}')
         ..writeln('-- Generated at: ${DateTime.now().toIso8601String()}')
         ..writeln('SET FOREIGN_KEY_CHECKS=0;')
         ..writeln();
 
-      for (final tableRow in tablesResult.rows) {
+      for (final tableRow in tableRows) {
         final tableName =
             tableRow.typedColByName<String>(tableNameColumn)?.trim() ?? '';
         if (tableName.isEmpty) {
@@ -505,6 +533,16 @@ class MySqlService {
 
         final rowsResult =
             await conn.execute('SELECT * FROM `$escapedTableName`');
+
+        final fetchedRows = rowsResult.rows.length;
+        cumulativeWeight += max(1, fetchedRows);
+        onProgress?.call(
+          totalWeight > 0
+              ? (cumulativeWeight / totalWeight).clamp(0.0, 1.0)
+              : 1.0,
+          tableName,
+        );
+
         if (rowsResult.rows.isEmpty) {
           continue;
         }

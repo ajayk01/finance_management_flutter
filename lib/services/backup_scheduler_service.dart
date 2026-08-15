@@ -22,16 +22,29 @@ const String _lastStatusKey = 'backup_schedule_last_status';
 const String _lastErrorKey = 'backup_schedule_last_error';
 const String _lastBackupPathKey = 'backup_schedule_last_backup_path';
 const String _nextRunAtListKey = 'backup_schedule_next_run_at_list';
+const String _scheduledAlarmCountKey = 'backup_schedule_alarm_count';
 const String _pendingUploadPathsKey = 'backup_schedule_pending_upload_paths';
 const String _backupStatusChannelId = 'backup_status_channel';
 const String _backupStatusChannelName = 'Backup Status Notifications';
 const String _backupStatusChannelDescription =
-  'Shows backup completion success or failure.';
+  'Shows backup start, completion, or failure.';
+const int _backupInProgressNotificationId = 700200;
+const int _backupCompletionNotificationId = 700201;
+const int _scheduledWindowDays = 7;
+const int _maxScheduledAlarmSlots = 512;
 
 @pragma('vm:entry-point')
 Future<void> backupAlarmCallback() async {
   DartPluginRegistrant.ensureInitialized();
-  await BackupSchedulerService.instance.handleBackgroundAlarm();
+  try {
+    await BackupSchedulerService.instance.handleBackgroundAlarm();
+  } catch (error, stackTrace) {
+    await BackupSchedulerService.instance.handleSchedulingFailure(
+      phase: 'background alarm callback',
+      error: error,
+      stackTrace: stackTrace,
+    );
+  }
 }
 
 class BackupScheduleSnapshot {
@@ -64,6 +77,7 @@ class BackupSchedulerService {
       FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
+  bool _notificationsInitialized = false;
   Future<void>? _initializing;
 
   Future<void> initialize() async {
@@ -113,7 +127,15 @@ class BackupSchedulerService {
       return;
     }
 
-    await _scheduleAllNextRuns(times: _readScheduleTimes(prefs));
+    try {
+      await _scheduleAllNextRuns(times: _readScheduleTimes(prefs));
+    } catch (error, stackTrace) {
+      await handleSchedulingFailure(
+        phase: 'schedule restore',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
   }
 
   Future<void> updateSchedule({
@@ -135,11 +157,20 @@ class BackupSchedulerService {
     await prefs.setInt(_hourKey, firstTime.hour);
     await prefs.setInt(_minuteKey, firstTime.minute);
 
-    if (enabled && normalizedTimes.isNotEmpty) {
-      await _scheduleAllNextRuns(times: normalizedTimes);
-    } else {
-      await _cancelAllScheduledAlarms();
-      await prefs.remove(_nextRunAtListKey);
+    try {
+      if (enabled && normalizedTimes.isNotEmpty) {
+        await _scheduleAllNextRuns(times: normalizedTimes);
+      } else {
+        await _cancelAllScheduledAlarms();
+        await prefs.remove(_nextRunAtListKey);
+      }
+    } catch (error, stackTrace) {
+      await handleSchedulingFailure(
+        phase: 'schedule update',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
     }
   }
 
@@ -149,7 +180,15 @@ class BackupSchedulerService {
 
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool(_enabledKey) ?? false) {
-      await _scheduleAllNextRuns(times: _readScheduleTimes(prefs));
+      try {
+        await _scheduleAllNextRuns(times: _readScheduleTimes(prefs));
+      } catch (error, stackTrace) {
+        await handleSchedulingFailure(
+          phase: 'manual backup reschedule',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
     }
   }
 
@@ -160,10 +199,40 @@ class BackupSchedulerService {
       return;
     }
 
-    await _runBackup(writeStatus: true);
-    if (prefs.getBool(_enabledKey) ?? false) {
-      await _scheduleAllNextRuns(times: _readScheduleTimes(prefs));
+    try {
+      await _runBackup(writeStatus: true);
+      if (prefs.getBool(_enabledKey) ?? false) {
+        await _scheduleAllNextRuns(times: _readScheduleTimes(prefs));
+      }
+    } catch (error, stackTrace) {
+      await handleSchedulingFailure(
+        phase: 'background backup reschedule',
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
+  }
+
+  Future<void> handleSchedulingFailure({
+    required String phase,
+    required Object error,
+    StackTrace? stackTrace,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final message = 'Backup scheduling failed during $phase: $error';
+
+    await prefs.setString(_lastStatusKey, 'Backup scheduling failed');
+    await prefs.setString(_lastErrorKey, message);
+
+    debugPrint('[BackupSchedulerService] $message');
+    if (stackTrace != null) {
+      debugPrint(stackTrace.toString());
+    }
+
+    await _showBackupCompletionNotification(
+      success: false,
+      message: message,
+    );
   }
 
   Future<void> _scheduleAllNextRuns({
@@ -184,12 +253,24 @@ class BackupSchedulerService {
     await _cancelAllScheduledAlarms();
 
     final now = DateTime.now();
-    final List<DateTime> nextRuns = [];
-    for (var index = 0; index < normalizedTimes.length; index++) {
-      final time = normalizedTimes[index];
-      final nextRun = _nextRunDateTime(now, time);
+    final scheduledRuns = _buildScheduledRunWindow(
+      now: now,
+      times: normalizedTimes,
+    );
+    if (scheduledRuns.isEmpty) {
+      throw StateError('No upcoming backup runs could be calculated.');
+    }
+
+    if (scheduledRuns.length > _maxScheduledAlarmSlots) {
+      throw StateError(
+        'Too many scheduled backup runs (${scheduledRuns.length}) for available alarm slots.',
+      );
+    }
+
+    for (var index = 0; index < scheduledRuns.length; index++) {
+      final scheduledRun = scheduledRuns[index];
       final scheduled = await AndroidAlarmManager.oneShotAt(
-        nextRun,
+        scheduledRun,
         _alarmIdForIndex(index),
         backupAlarmCallback,
         wakeup: true,
@@ -200,25 +281,57 @@ class BackupSchedulerService {
       if (!scheduled) {
         throw StateError('Failed to schedule one or more daily backup alarms.');
       }
-
-      nextRuns.add(nextRun);
     }
 
-    nextRuns.sort();
+    await prefs.setInt(_scheduledAlarmCountKey, scheduledRuns.length);
     await prefs.setStringList(
       _nextRunAtListKey,
-      nextRuns.map((value) => value.toIso8601String()).toList(),
+      scheduledRuns
+          .take(normalizedTimes.length)
+          .map((value) => value.toIso8601String())
+          .toList(),
     );
+  }
+
+  List<DateTime> _buildScheduledRunWindow({
+    required DateTime now,
+    required List<TimeOfDay> times,
+  }) {
+    final startOfToday = DateTime(now.year, now.month, now.day);
+    final scheduledRuns = <DateTime>[];
+
+    for (var dayOffset = 0; dayOffset < _scheduledWindowDays; dayOffset++) {
+      final day = startOfToday.add(Duration(days: dayOffset));
+      for (final time in times) {
+        final candidate = DateTime(
+          day.year,
+          day.month,
+          day.day,
+          time.hour,
+          time.minute,
+        );
+        if (candidate.isAfter(now)) {
+          scheduledRuns.add(candidate);
+        }
+      }
+    }
+
+    scheduledRuns.sort();
+    return scheduledRuns;
   }
 
   Future<bool> _runBackup({required bool writeStatus}) async {
     final prefs = await SharedPreferences.getInstance();
     final startedAt = DateTime.now();
 
+    await _showBackupStartNotification();
+
     try {
       await dotenv.load();
 
-      final backupPath = await MySqlService().backupDatabaseWithMysqldump();
+      final backupPath = await MySqlService()
+          .backupDatabaseWithMysqldump()
+          .timeout(const Duration(minutes: 15));
 
       final pendingUploads =
           prefs.getStringList(_pendingUploadPathsKey) ?? const [];
@@ -240,7 +353,7 @@ class BackupSchedulerService {
           await GoogleDriveBackupService.instance.uploadBackupFile(
             filePath: path,
             allowInteractiveSignIn: false,
-          );
+          ).timeout(const Duration(minutes: 2));
           uploadedCount += 1;
         } catch (uploadError) {
           uploadIssue = _friendlyUploadError(uploadError);
@@ -292,6 +405,66 @@ class BackupSchedulerService {
       );
 
       return false;
+    } finally {
+      // Safety net: ensure the ongoing notification is always dismissed.
+      await _localNotifications
+          .cancel(_backupInProgressNotificationId)
+          .catchError((_) {});
+    }
+  }
+
+  Future<void> _ensureNotificationChannel() async {
+    if (!_notificationsInitialized) {
+      const initializationSettings = InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        iOS: DarwinInitializationSettings(),
+      );
+      await _localNotifications
+          .initialize(initializationSettings)
+          .timeout(const Duration(seconds: 15));
+      _notificationsInitialized = true;
+    }
+
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(const AndroidNotificationChannel(
+          _backupStatusChannelId,
+          _backupStatusChannelName,
+          description: _backupStatusChannelDescription,
+          importance: Importance.high,
+        ))
+        .timeout(const Duration(seconds: 15));
+  }
+
+  Future<void> _showBackupStartNotification() async {
+    try {
+      await _ensureNotificationChannel();
+      await _localNotifications.show(
+        _backupInProgressNotificationId,
+        'Backup starting',
+        'Scheduled backup is in progress…',
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _backupStatusChannelId,
+            _backupStatusChannelName,
+            channelDescription: _backupStatusChannelDescription,
+            importance: Importance.low,
+            priority: Priority.low,
+            icon: '@mipmap/ic_launcher',
+            ongoing: true,
+            showProgress: true,
+            indeterminate: true,
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: false,
+            presentBadge: false,
+            presentSound: false,
+          ),
+        ),
+      ).timeout(const Duration(seconds: 15));
+    } catch (e) {
+      debugPrint('Failed to show backup start notification: $e');
     }
   }
 
@@ -300,28 +473,17 @@ class BackupSchedulerService {
     required String message,
   }) async {
     try {
-      const initializationSettings = InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-        iOS: DarwinInitializationSettings(),
-      );
-      await _localNotifications.initialize(initializationSettings);
+      await _ensureNotificationChannel();
 
-      const channel = AndroidNotificationChannel(
-        _backupStatusChannelId,
-        _backupStatusChannelName,
-        description: _backupStatusChannelDescription,
-        importance: Importance.high,
-      );
-
+      // Cancel the ongoing in-progress notification before showing the result.
       await _localNotifications
-          .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(channel);
+          .cancel(_backupInProgressNotificationId)
+          .timeout(const Duration(seconds: 15));
 
       final title = success ? 'Backup completed' : 'Backup failed';
 
       await _localNotifications.show(
-        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        _backupCompletionNotificationId,
         title,
         message,
         const NotificationDetails(
@@ -339,7 +501,7 @@ class BackupSchedulerService {
             presentSound: true,
           ),
         ),
-      );
+      ).timeout(const Duration(seconds: 15));
     } catch (e) {
       debugPrint('Failed to show backup completion notification: $e');
     }
@@ -360,6 +522,10 @@ class BackupSchedulerService {
   }
 
   String _friendlyUploadError(Object error) {
+    if (error is TimeoutException) {
+      return 'Google Drive upload timed out; upload will retry automatically.';
+    }
+
     if (error is SocketException) {
       return 'No internet connection right now; upload will retry automatically.';
     }
@@ -388,16 +554,6 @@ class BackupSchedulerService {
     final hour = prefs.getInt(_hourKey) ?? 10;
     final minute = prefs.getInt(_minuteKey) ?? 0;
     return [TimeOfDay(hour: hour, minute: minute)];
-  }
-
-  DateTime _nextRunDateTime(DateTime now, TimeOfDay time) {
-    final candidate =
-        DateTime(now.year, now.month, now.day, time.hour, time.minute);
-    if (candidate.isAfter(now)) {
-      return candidate;
-    }
-
-    return candidate.add(const Duration(days: 1));
   }
 
   DateTime? _readDateTime(String? value) {
@@ -439,10 +595,13 @@ class BackupSchedulerService {
   }
 
   Future<void> _cancelAllScheduledAlarms() async {
-    // Keep this high enough to cover practical schedule counts and stale legacy entries.
-    for (var index = 0; index < 64; index++) {
+    final prefs = await SharedPreferences.getInstance();
+    // Fall back to the full range only once, to clear any stale alarms from old installs.
+    final count = prefs.getInt(_scheduledAlarmCountKey) ?? _maxScheduledAlarmSlots;
+    for (var index = 0; index < count; index++) {
       await AndroidAlarmManager.cancel(_alarmIdForIndex(index));
     }
+    await prefs.remove(_scheduledAlarmCountKey);
   }
 
   String _encodeTime(TimeOfDay time) {
