@@ -236,16 +236,6 @@ class NotificationService {
     _routeNotificationData(data);
   }
 
-  void _tryHandlePendingLocalNotification() {
-    if (_pendingLocalNotificationData == null || !_canNavigateNow()) {
-      return;
-    }
-
-    final data = _pendingLocalNotificationData!;
-    _pendingLocalNotificationData = null;
-    _routeNotificationData(data);
-  }
-
   void _routeNotificationData(Map<String, dynamic> data) {
     if (data['isCCStatment'] == 'true' || data['isCCStatment'] == true) {
       _navigateToCCStatement(data);
@@ -259,18 +249,24 @@ class NotificationService {
 
   /// Called after the navigator is ready to process any pending notifications
   void processPendingNotifications() {
-    _tryHandlePendingRemoteNotification();
-    _tryHandlePendingLocalNotification();
-  }
+    final remoteData = _pendingRemoteNotificationData;
+    final localData = _pendingLocalNotificationData;
+    _pendingRemoteNotificationData = null;
+    _pendingLocalNotificationData = null;
 
-  void _tryHandlePendingRemoteNotification() {
-    if (_pendingRemoteNotificationData == null || !_canNavigateNow()) {
+    if (!_canNavigateNow()) {
+      _pendingRemoteNotificationData = remoteData;
+      _pendingLocalNotificationData = localData;
       return;
     }
 
-    final data = _pendingRemoteNotificationData!;
-    _pendingRemoteNotificationData = null;
-    _routeNotificationData(data);
+    if (remoteData != null) {
+      _routeNotificationData(remoteData);
+    }
+    if (localData != null &&
+        (remoteData == null || jsonEncode(localData) != jsonEncode(remoteData))) {
+      _routeNotificationData(localData);
+    }
   }
 
   void _handleNotificationTap(RemoteMessage message) {
