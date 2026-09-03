@@ -1,9 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:http/http.dart' as http;
 
 import 'mysql_service.dart';
+import 'splitwise_session_service.dart';
 
 class DirectExpenseService {
   static const int _transactionTypeExpense = 1;
@@ -22,6 +22,7 @@ class DirectExpenseService {
     List<String>? splitwiseUserIds,
     String? splitType,
     Map<String, double>? customAmounts,
+    Future<void> Function()? reauthenticateSplitwise,
   }) async {
     final parsedAccount = _parseAccount(account);
     final epochTime = _parseDateToEpoch(date);
@@ -58,6 +59,7 @@ class DirectExpenseService {
           splitType: 'custom',
           customAmounts: splitPayload.customAmounts,
           date: date,
+          reauthenticate: reauthenticateSplitwise,
         );
         splitwiseTransactionId =
             splitwiseResponse['expenses']?[0]?['id']?.toString() ??
@@ -171,6 +173,7 @@ class DirectExpenseService {
     List<String>? splitwiseUserIds,
     String? splitType,
     Map<String, double>? customAmounts,
+    Future<void> Function()? reauthenticateSplitwise,
   }) async {
     final transactionId = int.tryParse(id);
     if (transactionId == null || transactionId <= 0) {
@@ -263,7 +266,10 @@ WHERE TRANSACTION_ID = $transactionId
                 .toSet();
 
             for (final splitwiseId in splitwiseIds) {
-              await _deleteSplitwiseExpense(splitwiseId);
+              await _deleteSplitwiseExpense(
+                splitwiseId,
+                reauthenticate: reauthenticateSplitwise,
+              );
             }
 
             final dummyTxIds = existingRows
@@ -296,6 +302,7 @@ WHERE TRANSACTION_ID = $transactionId
               splitType: 'custom',
               customAmounts: splitPayload.customAmounts,
               date: date,
+              reauthenticate: reauthenticateSplitwise,
             );
 
             final splitwiseTransactionId =
@@ -678,9 +685,8 @@ INSERT INTO CreditCardTransactions (
     required String splitType,
     required Map<String, double> customAmounts,
     required String date,
+    Future<void> Function()? reauthenticate,
   }) async {
-    final apiKey = _getRequiredEnv('SPLITWISE_API_KEY');
-
     final fields = <String, String>{
       'cost': amount.toString(),
       'description': description,
@@ -745,13 +751,13 @@ INSERT INTO CreditCardTransactions (
             '${Uri.encodeQueryComponent(entry.key)}=${Uri.encodeQueryComponent(entry.value)}')
         .join('&');
 
-    final response = await http.post(
+    final response = await SplitwiseSessionService.instance.post(
       Uri.parse('https://secure.splitwise.com/api/v3.0/create_expense'),
       headers: {
-        'Authorization': 'Bearer $apiKey',
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: body,
+      reauthenticate: reauthenticate ?? _missingSplitwiseReauthentication,
     );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -772,19 +778,15 @@ INSERT INTO CreditCardTransactions (
     return parsed;
   }
 
-  static Future<void> _deleteSplitwiseExpense(String splitwiseTransactionId) async {
-    final apiKey = dotenv.env['SPLITWISE_API_KEY']?.trim() ?? '';
-    if (apiKey.isEmpty) {
-      return;
-    }
-
-    final response = await http.post(
+  static Future<void> _deleteSplitwiseExpense(
+    String splitwiseTransactionId, {
+    Future<void> Function()? reauthenticate,
+  }) async {
+    final response = await SplitwiseSessionService.instance.post(
       Uri.parse(
         'https://secure.splitwise.com/api/v3.0/delete_expense/$splitwiseTransactionId',
       ),
-      headers: {
-        'Authorization': 'Bearer $apiKey',
-      },
+      reauthenticate: reauthenticate ?? _missingSplitwiseReauthentication,
     );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -800,12 +802,8 @@ INSERT INTO CreditCardTransactions (
     return userId.trim() == _currentUserId;
   }
 
-  static String _getRequiredEnv(String key) {
-    final value = dotenv.env[key]?.trim() ?? '';
-    if (value.isEmpty) {
-      throw StateError('$key is not configured');
-    }
-    return value;
+  static Future<void> _missingSplitwiseReauthentication() {
+    throw StateError('Splitwise session expired. Please sign in again.');
   }
 
   static int? _parseNullableInt(String? value) {

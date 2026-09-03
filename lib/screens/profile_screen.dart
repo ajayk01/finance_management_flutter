@@ -11,6 +11,7 @@ import 'local_server_screen.dart';
 import 'pay_cc_bill_screen.dart';
 import 'splitwise_screen.dart';
 import 'unaudited_expense_screen.dart';
+import '../services/splitwise_session_service.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -53,7 +54,13 @@ class ProfileScreen extends StatelessWidget {
             _buildOptionTile(
               icon: Icons.group_outlined,
               title: 'Splitwise',
-              onTap: () {
+              onTap: () async {
+                try {
+                  await SplitwiseSessionService.instance.ensureAuthenticated(context);
+                  if (!context.mounted) return;
+                } catch (_) {
+                  return;
+                }
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const SplitwiseScreen()),

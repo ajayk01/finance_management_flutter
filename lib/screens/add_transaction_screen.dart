@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/app_data_cache.dart';
 import '../services/direct_expense_service.dart';
 import '../services/direct_sql_service.dart';
+import '../services/splitwise_session_service.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   final TransactionModel? prefill;
@@ -44,6 +45,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   bool _loading = true;
   bool _submitting = false;
+  bool _loadingSplitwise = false;
   List<Category> _apiCategories = [];
   List<BankAccount> _bankAccounts = [];
   List<CreditCardAccount> _creditCards = [];
@@ -329,6 +331,37 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       caps: cache.creditCardCaps,
       groups: cache.splitwiseGroups,
     );
+  }
+
+  Future<void> _toggleSplitwise() async {
+    if (_loadingSplitwise) return;
+    if (_showSplitwise) {
+      setState(() => _showSplitwise = false);
+      return;
+    }
+
+    setState(() => _loadingSplitwise = true);
+    try {
+      await SplitwiseSessionService.instance.ensureAuthenticated(context);
+      final cache = AppDataCache();
+      await cache.refreshGroups(reauthenticate: _reauthenticateSplitwise);
+      if (!mounted) return;
+      setState(() {
+        _splitwiseGroups = cache.splitwiseGroups;
+        if (_selectedGroup.isEmpty && _splitwiseGroups.isNotEmpty) {
+          _selectedGroup = _splitwiseGroups.first.name;
+        }
+        _showSplitwise = true;
+      });
+    } catch (error) {
+      if (mounted) _showValidationError(error.toString());
+    } finally {
+      if (mounted) setState(() => _loadingSplitwise = false);
+    }
+  }
+
+  Future<void> _reauthenticateSplitwise() {
+    return SplitwiseSessionService.instance.ensureAuthenticated(context, force: true);
   }
 
   List<String> get _categories {
@@ -719,6 +752,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               customAmounts: (body['customAmounts'] as Map?)?.map(
                 (key, value) => MapEntry(key.toString(), (value as num).toDouble()),
               ),
+              reauthenticateSplitwise: _reauthenticateSplitwise,
             );
             break;
           case 2:
@@ -845,6 +879,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     }
                     return m.isNotEmpty ? m : null;
                   }()
+                : null,
+            reauthenticateSplitwise: _showSplitwise
+                ? _reauthenticateSplitwise
                 : null,
           );
           break;
@@ -996,9 +1033,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         ),
         centerTitle: true,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Form(
+      body: Stack(
+        children: [
+          SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Form(
           key: _formKey,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1154,7 +1193,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               if (widget.isEdit && _selectedType == 1) ...[
                 const SizedBox(height: 16),
                 GestureDetector(
-                  onTap: () => setState(() => _showSplitwise = !_showSplitwise),
+                  onTap: _toggleSplitwise,
                   child: Row(
                     children: [
                       SizedBox(
@@ -1162,7 +1201,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                         height: 24,
                         child: Checkbox(
                           value: _showSplitwise,
-                          onChanged: (v) => setState(() => _showSplitwise = v ?? false),
+                          onChanged: (_) => _toggleSplitwise(),
                           activeColor: const Color(0xFF1E293B),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                         ),
@@ -1199,7 +1238,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                       child: SizedBox(
                         height: 52,
                         child: OutlinedButton.icon(
-                          onPressed: () {
+                          onPressed: () async {
                             if (!_showSplitwise) {
                               // Validate required fields before opening Splitwise
                               final errors = <String>[];
@@ -1216,7 +1255,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                                 return;
                               }
                             }
-                            setState(() => _showSplitwise = !_showSplitwise);
+                            await _toggleSplitwise();
                           },
                           icon: Image.asset('assets/images/splitwise_logo.png',
                               width: 20, height: 20),
@@ -1243,7 +1282,32 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 _buildSubmitButton(),
             ],
           ),
-        ),
+            ),
+          ),
+          if (_loadingSplitwise)
+            const Positioned.fill(
+              child: ColoredBox(
+                color: Color(0x99000000),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(color: Colors.white),
+                      SizedBox(height: 16),
+                      Text(
+                        'Loading Splitwise...',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

@@ -28,10 +28,16 @@ dependencies:
   google_sign_in: ^6.2.1
   http_parser: ^4.1.2
   android_alarm_manager_plus: ^5.1.1
+  flutter_inappwebview: ^6.1.5
+  flutter_secure_storage: ^10.3.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+
+dependency_overrides:
+  flutter_inappwebview_android:
+    path: third_party/flutter_inappwebview_android
 
 flutter:
   uses-material-design: true

@@ -1,33 +1,28 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:http/http.dart' as http;
 
 import '../models/models.dart';
 import 'mysql_service.dart';
+import 'splitwise_session_service.dart';
 
 class SplitwiseRouteService {
-  SplitwiseRouteService({
-    http.Client? client,
-    MySqlService? mySqlService,
-  })  : _client = client ?? http.Client(),
-        _mySqlService = mySqlService ?? MySqlService();
+  SplitwiseRouteService({MySqlService? mySqlService})
+      : _mySqlService = mySqlService ?? MySqlService();
 
-  final http.Client _client;
   final MySqlService _mySqlService;
 
   Future<Map<String, dynamic>> _fetchSplitwise(
     String endpoint,
-    String apiKey,
+    Future<void> Function() reauthenticate,
   ) async {
     final url = Uri.parse('https://secure.splitwise.com/api/v3.0/$endpoint');
-    final response = await _client.get(
+    final response = await SplitwiseSessionService.instance.get(
       url,
       headers: {
-        'Authorization': 'Bearer $apiKey',
         'Content-Type': 'application/json',
       },
+      reauthenticate: reauthenticate,
     );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -55,11 +50,10 @@ class SplitwiseRouteService {
     throw const FormatException('Unexpected Splitwise response format');
   }
 
-  Future<List<SplitwiseGroup>> getGroupsWithMembers() async {
-    final splitwiseApiKey = dotenv.env['SPLITWISE_API_KEY']?.trim() ?? '';
-    if (splitwiseApiKey.isEmpty) {
-      throw StateError('Splitwise API key is not configured.');
-    }
+  Future<List<SplitwiseGroup>> getGroupsWithMembers({
+    Future<void> Function()? reauthenticate,
+  }) async {
+    final renewSession = reauthenticate ?? _missingReauthentication;
 
     final config = MySqlConfig.fromDotEnv();
     await _mySqlService.connect(config);
@@ -80,7 +74,7 @@ class SplitwiseRouteService {
         }
       }
 
-      final groupsResponse = await _fetchSplitwise('get_groups', splitwiseApiKey);
+      final groupsResponse = await _fetchSplitwise('get_groups', renewSession);
       final rawGroups = (groupsResponse['groups'] as List? ?? []);
 
       final groupsWithMembers = <SplitwiseGroup>[];
@@ -93,7 +87,7 @@ class SplitwiseRouteService {
 
         final groupDetails = await _fetchSplitwise(
           'get_group/$groupId',
-          splitwiseApiKey,
+          renewSession,
         );
 
         final groupPayload = groupDetails['group'];
@@ -131,5 +125,9 @@ class SplitwiseRouteService {
     } finally {
       await _mySqlService.disconnect();
     }
+  }
+
+  Future<void> _missingReauthentication() {
+    throw StateError('Splitwise session expired. Please sign in again.');
   }
 }

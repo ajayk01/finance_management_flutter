@@ -226,9 +226,11 @@ class AppDataCache {
     }
   }
 
-  Future<void> refreshGroups() async {
+  Future<void> refreshGroups({Future<void> Function()? reauthenticate}) async {
     try {
-      final groups = await _splitwiseRouteService.getGroupsWithMembers();
+      final groups = await _splitwiseRouteService.getGroupsWithMembers(
+        reauthenticate: reauthenticate,
+      );
       _splitwiseGroups = groups;
       _groupsLoaded = true;
     } catch (e) {
