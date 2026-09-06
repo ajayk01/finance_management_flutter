@@ -44,7 +44,7 @@ class _AccountCardState extends State<AccountCard> {
           ];
     final invList = widget.investmentAccounts.isNotEmpty
         ? widget.investmentAccounts
-            .map((a) => {'name': a.name, 'balance': formatINR(a.currentValue), 'logo': ''})
+            .map((a) => {'name': a.name, 'balance': formatINR(a.totalInvested), 'logo': ''})
             .toList()
         : <Map<String, String>>[
             {'name': 'Vanguard S&P 500', 'balance': '₹45,200.00', 'logo': ''},

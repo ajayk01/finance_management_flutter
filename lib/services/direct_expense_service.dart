@@ -211,10 +211,12 @@ UPDATE Transactions
 SET DATE = :date,
     NOTES = :notes,
     AMOUNT = :amount,
+  TRANSCATION_TYPE = :transactionType,
     FROM_ACCOUNT_ID = :fromAccountId,
+  TO_ACCOUNT_ID = NULL,
     CATEGORY_ID = :categoryId,
     SUB_CATEGORY_ID = :subCategoryId
-WHERE ID = :id AND TRANSCATION_TYPE = :transactionType
+WHERE ID = :id
 ''',
           {
             'date': epochTime,

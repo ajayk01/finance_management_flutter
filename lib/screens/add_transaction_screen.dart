@@ -131,7 +131,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     }
     if (tx.category != null) _selectedCategory = tx.category!;
     if (tx.subCategory != null) _selectedSubCategory = tx.subCategory!;
-    if (tx.accountName != null) _selectedAccount = tx.accountName!;
+    if (tx.accountName != null) {
+      _selectedAccount = tx.accountName!;
+      _selectedFromAccount = tx.accountName!;
+    }
 
     // For Transfer: accountName is the from account
     if (tx.type.toLowerCase() == 'transfer' && tx.accountName != null) {
@@ -1060,7 +1063,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 icon: Icons.currency_rupee_outlined,
                 keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
                 prefix: '₹ ',
-                readOnly: widget.fromNotification || widget.lockFields.contains('amount') || (widget.isEdit && _selectedType == 1),
+                readOnly: widget.fromNotification ||
+                  widget.lockFields.contains('amount') ||
+                  (widget.isEdit && _selectedType == 1),
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'^-?\d*\.?\d*')),
                 ],
@@ -1082,7 +1087,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   icon: Icons.discount_outlined,
                   keyboardType: const TextInputType.numberWithOptions(signed: false, decimal: true),
                   prefix: '₹ ',
-                  readOnly: widget.fromNotification && !widget.isEdit,
+                  readOnly: widget.fromNotification,
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                   ],
@@ -1142,7 +1147,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   label: 'From Account',
                   value: _selectedFromAccount,
                   icon: Icons.account_balance_outlined,
-                  onTap: (widget.fromNotification || widget.lockFields.contains('account')) ? null : () => _showFromAccountPicker(),
+                  onTap: widget.fromNotification || widget.lockFields.contains('account')
+                      ? null
+                      : () => _showFromAccountPicker(),
                   errorText: _fromAccountError,
                 ),
                 const SizedBox(height: 16),
@@ -1162,7 +1169,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   icon: _isCreditCard
                       ? Icons.credit_card
                       : Icons.account_balance_outlined,
-                  onTap: (widget.fromNotification || widget.lockFields.contains('account')) ? null : () => _showAccountPicker(),
+                  onTap: widget.fromNotification || widget.lockFields.contains('account')
+                      ? null
+                      : () => _showAccountPicker(),
                   errorText: _accountError,
                 ),
                 const SizedBox(height: 16),
@@ -1329,16 +1338,18 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 FocusManager.instance.primaryFocus?.unfocus();
                 setState(() {
                   _selectedType = i;
-                  // Sync account fields when switching between types
-                  if (i == 2 || i == 3) {
-                    // Switching to Transfer/Investment: carry Account → From Account
-                    if (_selectedAccount.isNotEmpty) {
-                      _selectedFromAccount = _selectedAccount;
-                    }
-                  } else {
-                    // Switching to Income/Expense: carry From Account → Account
-                    if (_selectedFromAccount.isNotEmpty) {
-                      _selectedAccount = _selectedFromAccount;
+                  if (!widget.fromNotification) {
+                    // Sync account fields when switching between types.
+                    if (i == 2 || i == 3) {
+                      // Switching to Transfer/Investment: carry Account → From Account
+                      if (_selectedAccount.isNotEmpty) {
+                        _selectedFromAccount = _selectedAccount;
+                      }
+                    } else {
+                      // Switching to Income/Expense: carry From Account → Account
+                      if (_selectedFromAccount.isNotEmpty) {
+                        _selectedAccount = _selectedFromAccount;
+                      }
                     }
                   }
                   final cats = _categories;
