@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 import '../services/app_data_cache.dart';
+import '../services/direct_sql_service.dart';
 import '../models/models.dart';
 import '../utils/currency_formatter.dart';
 
@@ -723,6 +724,10 @@ class _SettleUpDialogState extends State<_SettleUpDialog> {
         bankAccountId: _selectedAccountId!,
         totalSettlementAmount: amount,
         settledTransactionIds: widget.settledTransactionIds,
+      );
+      await DirectSqlService.markSplitwiseTransactionsSettled(
+        friendId: widget.friendId,
+        transactionIds: widget.settledTransactionIds ?? const [],
       );
       widget.onSettled();
       if (mounted) Navigator.of(context).pop();

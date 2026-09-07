@@ -559,13 +559,15 @@ INSERT INTO SplitwiseTransactions (
     TRANSACTION_ID,
     FRIEND_ID,
     SPLITED_AMOUNT,
-    SPLITED_TRANSACTION_ID
+    SPLITED_TRANSACTION_ID,
+    IS_SETTLED
 ) VALUES (
     :splitwiseTransactionId,
     :transactionId,
     :friendId,
     :splitAmount,
-    :splitedTransactionId
+    :splitedTransactionId,
+    0
 )
 ''',
       {

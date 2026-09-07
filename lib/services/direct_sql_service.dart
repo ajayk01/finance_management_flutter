@@ -690,6 +690,45 @@ WHERE ID = :id
         );
     }
 
+    static Future<void> markSplitwiseTransactionsSettled({
+        required String friendId,
+        required List<String> transactionIds,
+    }) async {
+        final parsedTransactionIds = transactionIds
+            .map(int.tryParse)
+            .whereType<int>()
+            .toSet()
+            .toList();
+
+        if (friendId.trim().isEmpty || parsedTransactionIds.isEmpty) {
+            return;
+        }
+
+        final config = MySqlConfig.fromDotEnv();
+        final service = MySqlService();
+        await service.connect(config);
+
+        final placeholders = List.generate(
+            parsedTransactionIds.length,
+            (index) => ':transactionId$index',
+        ).join(', ');
+        final params = <String, dynamic>{'friendId': friendId};
+        for (var index = 0; index < parsedTransactionIds.length; index++) {
+            params['transactionId$index'] = parsedTransactionIds[index];
+        }
+
+        await service.executeWriteQuery(
+            'UPDATE SplitwiseTransactions st '
+            'JOIN SplitwiseFriends sf ON sf.ID = st.FRIEND_ID '
+            'SET st.IS_SETTLED = 1 '
+            'WHERE (sf.ID = :friendId OR sf.SPLITWISE_FRIEND_ID = :friendId) '
+            'AND st.TRANSACTION_ID IN ($placeholders) '
+            'AND COALESCE(st.IS_SETTLED, 0) = 0',
+            params,
+        );
+        await service.disconnect();
+    }
+
     static Future<TransactionModel?> getTransactionById(String transactionId) async {
         final parsedId = int.tryParse(transactionId);
         if (parsedId == null) {
@@ -732,6 +771,7 @@ WHERE ID = :id
             "st.TRANSACTION_ID AS transaction_id, "
             "st.SPLITWISE_TRANSACTION_ID AS splitwise_transaction_id, "
             "st.SPLITED_AMOUNT AS splited_amount, "
+            "COALESCE(st.IS_SETTLED, 0) AS is_settled, "
             "sf.ID AS db_friend_id, "
             "sf.SPLITWISE_FRIEND_ID AS splitwise_friend_id, "
             "sf.NAME AS friend_name "
@@ -753,6 +793,7 @@ WHERE ID = :id
                 'splitwiseUserId': splitwiseFriendId ?? dbFriendId ?? '',
                 'friendName': splitwiseMap['friend_name']?.toString() ?? '',
                 'splitedAmount': _toDouble(splitwiseMap['splited_amount']),
+                'isSettled': _toDouble(splitwiseMap['is_settled']) == 1,
             };
         }).toList();
 
@@ -900,6 +941,7 @@ WHERE ID = :id
                 "st.TRANSACTION_ID AS transaction_id, "
                 "st.SPLITWISE_TRANSACTION_ID AS splitwise_transaction_id, "
                 "st.SPLITED_AMOUNT AS splited_amount, "
+                "COALESCE(st.IS_SETTLED, 0) AS is_settled, "
                 "sf.ID AS db_friend_id, "
                 "sf.SPLITWISE_FRIEND_ID AS splitwise_friend_id, "
                 "sf.NAME AS friend_name "
@@ -925,6 +967,7 @@ WHERE ID = :id
                     'splitwiseUserId': splitwiseFriendId ?? dbFriendId ?? '',
                     'friendName': splitwiseMap['friend_name']?.toString() ?? '',
                     'splitedAmount': _toDouble(splitwiseMap['splited_amount']),
+                    'isSettled': _toDouble(splitwiseMap['is_settled']) == 1,
                 });
             }
         }
@@ -978,8 +1021,7 @@ WHERE ID = :id
         final fromTimestamp = range.fromTimestamp;
         final toTimestamp = range.toTimestamp;
 
-        // For transactions that exist in SplitwiseTransactions, subtract the
-        // sum of all SPLITED_AMOUNT entries from the transaction's AMOUNT.
+        // Subtract only amounts still owed to friends from the transaction's amount.
         // For normal transactions (no splitwise rows), use the full AMOUNT.
         String sql = "SELECT "
             "COALESCE(SUM(CASE WHEN t.TRANSCATION_TYPE = 2 THEN t.AMOUNT - COALESCE(st.total_split, 0) ELSE 0 END), 0) AS total_income, "
@@ -989,6 +1031,7 @@ WHERE ID = :id
             "LEFT JOIN ("
                 "SELECT TRANSACTION_ID, SUM(SPLITED_AMOUNT) AS total_split "
                 "FROM SplitwiseTransactions "
+                "WHERE COALESCE(IS_SETTLED, 0) = 0 "
                 "GROUP BY TRANSACTION_ID"
             ") st ON st.TRANSACTION_ID = t.ID "
             "WHERE t.DATE >= $fromTimestamp AND t.DATE <= $toTimestamp";
@@ -1018,6 +1061,7 @@ WHERE ID = :id
         final sql = "WITH splits AS ("
             "  SELECT TRANSACTION_ID, SUM(SPLITED_AMOUNT) AS total_split "
             "  FROM SplitwiseTransactions "
+            "  WHERE COALESCE(IS_SETTLED, 0) = 0 "
             "  GROUP BY TRANSACTION_ID"
             "), "
             "expense_income_summary AS ("
