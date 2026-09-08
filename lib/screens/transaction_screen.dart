@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../services/app_data_cache.dart';
 import '../services/direct_sql_service.dart';
 import '../utils/currency_formatter.dart';
+import '../widgets/credit_card_cap_carousel.dart';
 import '../widgets/overview_bar_chart.dart';
 import 'add_transaction_screen.dart';
 
@@ -95,6 +96,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
   List<TransactionModel> _transactions = [];
   List<BankAccount> _bankAccounts = [];
   List<CreditCardAccount> _creditCardAccounts = [];
+  List<CreditCardCap> _creditCardCaps = [];
   Map<String, double> _apiExpenseByCategory = {};
   Map<String, double> _apiIncomeByCategory = {};
   double _totalIncome = 0;
@@ -164,16 +166,17 @@ class _TransactionScreenState extends State<TransactionScreen> {
     await _fetchAndUpdateTransactions(month, year, cache);
   }
 
-  Future<void> _fetchAndUpdateTransactions(String month, String year, AppDataCache cache) async {
+  Future<void> _fetchAndUpdateTransactions(
+      String month, String year, AppDataCache cache) async {
     try {
       final shouldFetchAccounts = !cache.hasAccountsSnapshot;
       final shouldFetchMonthly = !cache.hasMonthlySummaryCache(month, year);
 
       final requests = <Future<dynamic>>[
         DirectSqlService.getAllTransactions(month, year),
+        DirectSqlService.getAllCreditCardCaps(),
       ];
-      if (shouldFetchAccounts) 
-      {
+      if (shouldFetchAccounts) {
         requests.add(DirectSqlService.getAllActiveAccounts());
       }
       if (shouldFetchMonthly) {
@@ -183,7 +186,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
       final results = await Future.wait(requests);
 
       var resultIdx = 0;
-  final txList = results[resultIdx++] as List<TransactionModel>;
+      final txList = results[resultIdx++] as List<TransactionModel>;
+      final creditCardCaps = results[resultIdx++] as List<CreditCardCap>;
       ActiveAccountsResult? accountsData;
       ({
         List<Category> categories,
@@ -250,9 +254,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
           totalInvestment: totalInvestment,
         );
       } else {
-        expByCat = Map.of(cache.getCachedMonthlyExpenseByCategory(month, year) ??
-            cache.getCachedExpenseByCategory(month, year) ??
-            {});
+        expByCat = Map.of(
+            cache.getCachedMonthlyExpenseByCategory(month, year) ??
+                cache.getCachedExpenseByCategory(month, year) ??
+                {});
         incByCat = Map.of(cache.getCachedMonthlyIncomeByCategory(month, year) ??
             cache.getCachedIncomeByCategory(month, year) ??
             {});
@@ -275,6 +280,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
           _transactions = txList;
           _bankAccounts = banks;
           _creditCardAccounts = cards;
+          _creditCardCaps = creditCardCaps;
           _apiExpenseByCategory = expByCat;
           _apiIncomeByCategory = incByCat;
           _totalIncome = totalIncome;
@@ -288,7 +294,13 @@ class _TransactionScreenState extends State<TransactionScreen> {
     }
   }
 
-  static const _filters = ['All', 'Income', 'Expense', 'Transfer', 'Investment'];
+  static const _filters = [
+    'All',
+    'Income',
+    'Expense',
+    'Transfer',
+    'Investment'
+  ];
 
   static const _expenseColors = [
     Color(0xFFEF4444),
@@ -366,8 +378,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
     // Filter by type
     if (_selectedFilter != 'All') {
       filtered = filtered
-          .where((t) =>
-              t.type.toLowerCase() == _selectedFilter.toLowerCase())
+          .where((t) => t.type.toLowerCase() == _selectedFilter.toLowerCase())
           .toList();
     }
 
@@ -376,8 +387,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
       filtered = filtered
           .where((t) =>
               t.accountName == _selectedAccount ||
-              (t.type.toLowerCase() == 'transfer' && t.subCategory == _selectedAccount) ||
-              (t.type.toLowerCase() == 'investment' && t.investmentAccountName == _selectedAccount))
+              (t.type.toLowerCase() == 'transfer' &&
+                  t.subCategory == _selectedAccount) ||
+              (t.type.toLowerCase() == 'investment' &&
+                  t.investmentAccountName == _selectedAccount))
           .toList();
     }
 
@@ -390,15 +403,15 @@ class _TransactionScreenState extends State<TransactionScreen> {
       if (!dayMap.containsKey(dateStr)) {
         dayMap[dateStr] = [];
       }
-      final isExpense =
-          tx.type.toLowerCase() == 'expense';
+      final isExpense = tx.type.toLowerCase() == 'expense';
       final isIncome = tx.type.toLowerCase() == 'income';
       final isTransfer = tx.type.toLowerCase() == 'transfer';
       dayMap[dateStr]!.add(Transaction(
         title: tx.description,
         subtitle: [
           tx.category ?? tx.type,
-          if (tx.subCategory != null && tx.subCategory!.isNotEmpty) tx.subCategory!,
+          if (tx.subCategory != null && tx.subCategory!.isNotEmpty)
+            tx.subCategory!,
         ].join(' • '),
         amount: tx.amount,
         type: _mapType(tx.type),
@@ -486,8 +499,18 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
   String get _formattedMonth {
     const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December',
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
     ];
     return '${months[_currentDate.month - 1]} ${_currentDate.year}';
   }
@@ -501,307 +524,472 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
     return Stack(
       children: [
-      SafeArea(
-      child: Column(
-        children: [
-          // ── Header ──
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: _currentDate,
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2030),
-                      initialDatePickerMode: DatePickerMode.year,
+        SafeArea(
+          child: Column(
+            children: [
+              // ── Header ──
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: _currentDate,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2030),
+                          initialDatePickerMode: DatePickerMode.year,
+                        );
+                        if (picked != null) {
+                          setState(() {
+                            _currentDate = DateTime(picked.year, picked.month);
+                          });
+                          _loadTransactions();
+                        }
+                      },
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Icon(Icons.calendar_month_outlined,
+                            size: 18, color: Colors.grey.shade700),
+                      ),
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () => _changeMonth(-1),
+                      child: Icon(Icons.chevron_left,
+                          size: 22, color: Colors.grey.shade700),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _formattedMonth,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    GestureDetector(
+                      onTap: () => _changeMonth(1),
+                      child: Icon(Icons.chevron_right,
+                          size: 22, color: Colors.grey.shade700),
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () => _showAccountFilter(context),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: _selectedAccount != 'All'
+                              ? const Color(0xFF3B3BF9).withValues(alpha: 0.1)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: _selectedAccount != 'All'
+                                ? const Color(0xFF3B3BF9)
+                                : Colors.grey.shade200,
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.filter_list_rounded,
+                          size: 18,
+                          color: _selectedAccount != 'All'
+                              ? const Color(0xFF3B3BF9)
+                              : Colors.grey.shade700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── Filter Chips ──
+              SizedBox(
+                height: 38,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  itemCount: _filters.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  itemBuilder: (context, i) {
+                    final f = _filters[i];
+                    final selected = f == _selectedFilter;
+                    return GestureDetector(
+                      onTap: () => setState(() => _selectedFilter = f),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 8),
+                        decoration: BoxDecoration(
+                          color:
+                              selected ? const Color(0xFF1E293B) : Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: selected
+                                ? const Color(0xFF1E293B)
+                                : Colors.grey.shade300,
+                          ),
+                        ),
+                        child: Text(
+                          f,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color:
+                                selected ? Colors.white : Colors.grey.shade700,
+                          ),
+                        ),
+                      ),
                     );
-                    if (picked != null) {
-                      setState(() {
-                        _currentDate = DateTime(picked.year, picked.month);
-                      });
-                      _loadTransactions();
-                    }
                   },
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ── Total Spend + Segmented Bar (Overview style) ──
+              if (totalSpend > 0 && _selectedFilter != 'All')
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: Container(
-                    width: 36,
-                    height: 36,
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: Icon(Icons.calendar_month_outlined,
-                        size: 18, color: Colors.grey.shade700),
-                  ),
-                ),
-                const Spacer(),
-                GestureDetector(
-                  onTap: () => _changeMonth(-1),
-                  child:
-                      Icon(Icons.chevron_left, size: 22, color: Colors.grey.shade700),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  _formattedMonth,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1E293B),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                GestureDetector(
-                  onTap: () => _changeMonth(1),
-                  child: Icon(Icons.chevron_right,
-                      size: 22, color: Colors.grey.shade700),
-                ),
-                const Spacer(),
-                GestureDetector(
-                  onTap: () => _showAccountFilter(context),
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: _selectedAccount != 'All'
-                          ? const Color(0xFF3B3BF9).withValues(alpha: 0.1)
-                          : Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: _selectedAccount != 'All'
-                            ? const Color(0xFF3B3BF9)
-                            : Colors.grey.shade200,
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.filter_list_rounded,
-                      size: 18,
-                      color: _selectedAccount != 'All'
-                          ? const Color(0xFF3B3BF9)
-                          : Colors.grey.shade700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // ── Filter Chips ──
-          SizedBox(
-            height: 38,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: _filters.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (context, i) {
-                final f = _filters[i];
-                final selected = f == _selectedFilter;
-                return GestureDetector(
-                  onTap: () => setState(() => _selectedFilter = f),
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: selected ? const Color(0xFF1E293B) : Colors.white,
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color:
-                            selected ? const Color(0xFF1E293B) : Colors.grey.shade300,
-                      ),
                     ),
-                    child: Text(
-                      f,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: selected ? Colors.white : Colors.grey.shade700,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          // ── Overview (only for All filter) ──
-          if (_selectedFilter == 'All') ...[            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: OverviewBarChart(
-                income: _totalIncome,
-                expense: _totalExpense,
-                investment: _totalInvestment,
-              ),
-            ),
-            const SizedBox(height: 20),
-          ],
-
-          // ── Total Spend + Segmented Bar (Overview style) ──
-          if (totalSpend > 0 && _selectedFilter != 'All')
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        _selectedFilter == 'Income'
-                            ? 'Total Income'
-                            : _selectedFilter == 'Investment'
-                                ? 'Total Investment'
-                                : 'Total Spend',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade900,
-                        ),
-                      ),
-                      Flexible(
-                        child: Wrap(
-                          spacing: 12,
-                          runSpacing: 6,
-                          alignment: WrapAlignment.end,
-                          children: _categories.map((c) {
-                            return Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: c.color,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  c.name,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.grey.shade500,
-                                  ),
-                                ),
-                              ],
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: SizedBox(
-                      height: 14,
-                      child: Row(
-                        children: _categories.asMap().entries.map((entry) {
-                          final i = entry.key;
-                          final c = entry.value;
-                          return Expanded(
-                            flex: (c.amount * 100 / totalSpend).round().clamp(1, 100),
-                            child: Container(
-                              margin: EdgeInsets.only(
-                                right: i < _categories.length - 1 ? 2 : 0,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              _selectedFilter == 'Income'
+                                  ? 'Total Income'
+                                  : _selectedFilter == 'Investment'
+                                      ? 'Total Investment'
+                                      : 'Total Spend',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey.shade900,
                               ),
-                              color: c.color,
                             ),
-                          );
-                        }).toList(),
-                      ),
+                            Flexible(
+                              child: Wrap(
+                                spacing: 12,
+                                runSpacing: 6,
+                                alignment: WrapAlignment.end,
+                                children: _categories.map((c) {
+                                  return Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: BoxDecoration(
+                                          color: c.color,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        c.name,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey.shade500,
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: SizedBox(
+                            height: 14,
+                            child: Row(
+                              children:
+                                  _categories.asMap().entries.map((entry) {
+                                final i = entry.key;
+                                final c = entry.value;
+                                return Expanded(
+                                  flex: (c.amount * 100 / totalSpend)
+                                      .round()
+                                      .clamp(1, 100),
+                                  child: Container(
+                                    margin: EdgeInsets.only(
+                                      right: i < _categories.length - 1 ? 2 : 0,
+                                    ),
+                                    color: c.color,
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Total: ${formatINR(totalSpend, decimals: 0)}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey.shade700,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                _categories
+                                    .map(
+                                        (c) => formatINR(c.amount, decimals: 0))
+                                    .join(' · '),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade500,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.end,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Total: ${formatINR(totalSpend, decimals: 0)}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade700,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          _categories.map((c) => formatINR(c.amount, decimals: 0)).join(' · '),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade500,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.end,
-                        ),
-                      ),
-                    ],
+                ),
+
+              const SizedBox(height: 20),
+
+              // ── Transaction List ──
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: _refreshTransactions,
+                  child: Builder(
+                    builder: (context) {
+                      final groups = _filteredGroups;
+                      final selectedCard = _selectedCreditCard;
+                      final showSelectedCardCaps = selectedCard != null &&
+                          _creditCardCaps.any(
+                              (cap) => cap.creditCardId == selectedCard.id);
+                      final overviewCount = _selectedFilter == 'All' ? 1 : 0;
+                      final capDetailsCount = showSelectedCardCaps ? 1 : 0;
+                      return ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        itemCount:
+                            groups.length + overviewCount + capDetailsCount,
+                        itemBuilder: (context, index) {
+                          if (overviewCount == 1 && index == 0) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 20),
+                              child: selectedCard == null
+                                  ? _buildOverviewSection()
+                                  : _buildCreditCardOverview(selectedCard),
+                            );
+                          }
+                          if (capDetailsCount == 1 && index == overviewCount) {
+                            return _buildSelectedCreditCardCaps(selectedCard!);
+                          }
+                          final groupIndex =
+                              index - overviewCount - capDetailsCount;
+                          return _buildDayGroupWidget(groups[groupIndex]);
+                        },
+                      );
+                    },
                   ),
-                ],
+                ),
               ),
+            ],
+          ),
+        ),
+        if (_deleting)
+          Container(
+            color: Colors.black26,
+            child: const Center(child: CircularProgressIndicator()),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildOverviewSection() {
+    return OverviewBarChart(
+      income: _totalIncome,
+      expense: _totalExpense,
+      investment: _totalInvestment,
+    );
+  }
+
+  Widget _buildCreditCardOverview(CreditCardAccount card) {
+    final totalLimit = card.totalLimit;
+    final usedAmount = card.usedAmount.abs();
+    final availableCredit = card.availableCredit > 0
+        ? card.availableCredit
+        : (totalLimit - usedAmount).clamp(0, double.infinity).toDouble();
+    final utilization =
+        totalLimit <= 0 ? 0.0 : (usedAmount / totalLimit).clamp(0.0, 1.0);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDBEAFE),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.credit_card_rounded,
+                    color: Color(0xFF2563EB), size: 21),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(card.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700)),
+                    Text('Credit card overview',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade500)),
+                  ],
+                ),
+              ),
+              Text('${(utilization * 100).round()}% used',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF2563EB))),
+            ],
+          ),
+          const SizedBox(height: 18),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: utilization,
+              minHeight: 10,
+              backgroundColor: const Color(0xFFE5E7EB),
+              valueColor: const AlwaysStoppedAnimation(Color(0xFF2563EB)),
             ),
           ),
-
-          const SizedBox(height: 20),
-
-          // ── Transaction List ──
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _refreshTransactions,
-              child: Builder(
-                builder: (context) {
-                  final groups = _filteredGroups;
-                  return ListView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    itemCount: groups.length,
-                    itemBuilder: (context, i) =>
-                        _buildDayGroupWidget(groups[i]),
-                  );
-                },
-              ),
-            ),
+          const SizedBox(height: 18),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final itemWidth = (constraints.maxWidth - 12) / 2;
+              return Wrap(
+                spacing: 12,
+                runSpacing: 14,
+                children: [
+                  _buildCreditCardMetric('Total limit', totalLimit,
+                      const Color(0xFF1E293B), itemWidth),
+                  _buildCreditCardMetric(
+                      'Used', usedAmount, const Color(0xFF2563EB), itemWidth),
+                  _buildCreditCardMetric('Available', availableCredit,
+                      const Color(0xFF16A34A), itemWidth),
+                  _buildCreditCardMetric('Reward points', card.rewardPoints,
+                      const Color(0xFF7C3AED), itemWidth,
+                      isCurrency: false),
+                ],
+              );
+            },
           ),
         ],
       ),
-    ),
-    if (_deleting)
-      Container(
-        color: Colors.black26,
-        child: const Center(child: CircularProgressIndicator()),
+    );
+  }
+
+  Widget _buildCreditCardMetric(
+    String label,
+    double amount,
+    Color color,
+    double width, {
+    bool isCurrency = true,
+  }) {
+    return SizedBox(
+      width: width,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+          const SizedBox(height: 3),
+          Text(
+            isCurrency
+                ? formatINR(amount, decimals: 0)
+                : amount.toStringAsFixed(0),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w700, color: color),
+          ),
+        ],
       ),
-    ],
+    );
+  }
+
+  CreditCardAccount? get _selectedCreditCard => _creditCardAccounts
+      .where((account) => account.name == _selectedAccount)
+      .firstOrNull;
+
+  Widget _buildSelectedCreditCardCaps(CreditCardAccount card) {
+    final caps =
+        _creditCardCaps.where((cap) => cap.creditCardId == card.id).toList();
+    if (caps.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Cap Details - ${card.name}',
+              style:
+                  const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          CreditCardCapCarousel(caps: caps),
+        ],
+      ),
     );
   }
 
   // Account filter lists built from API data
   List<Map<String, String>> get _bankAccountOptions => _bankAccounts.isNotEmpty
-      ? _bankAccounts
-          .map((a) => {'name': a.name, 'number': ''})
-          .toList()
+      ? _bankAccounts.map((a) => {'name': a.name, 'number': ''}).toList()
       : [
           {'name': 'Chase Bank', 'number': '••6789'},
           {'name': 'Bank of America', 'number': '••3421'},
         ];
 
-  List<Map<String, String>> get _creditCardOptions => _creditCardAccounts.isNotEmpty
-      ? _creditCardAccounts
-          .map((a) => {'name': a.name, 'number': ''})
-          .toList()
+  List<Map<String, String>> get _creditCardOptions => _creditCardAccounts
+          .isNotEmpty
+      ? _creditCardAccounts.map((a) => {'name': a.name, 'number': ''}).toList()
       : [
           {'name': 'Visa', 'number': '••4521'},
           {'name': 'Mastercard', 'number': '••8832'},
@@ -872,11 +1060,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
               ),
               const SizedBox(height: 8),
               ..._bankAccountOptions.map((a) => _buildAccountOption(
-                ctx,
-                a['name']!,
-                a['number']!,
-                Icons.account_balance_outlined,
-              )),
+                    ctx,
+                    a['name']!,
+                    a['number']!,
+                    Icons.account_balance_outlined,
+                  )),
               const SizedBox(height: 16),
               // Credit Cards section
               Text(
@@ -890,11 +1078,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
               ),
               const SizedBox(height: 8),
               ..._creditCardOptions.map((a) => _buildAccountOption(
-                ctx,
-                a['name']!,
-                a['number']!,
-                Icons.credit_card,
-              )),
+                    ctx,
+                    a['name']!,
+                    a['number']!,
+                    Icons.credit_card,
+                  )),
             ],
           ),
         );
@@ -1084,34 +1272,45 @@ class _TransactionScreenState extends State<TransactionScreen> {
           // Actions popup
           if (t.model != null)
             PopupMenuButton<String>(
-              icon: Icon(Icons.more_vert, size: 20, color: Colors.grey.shade400),
+              icon:
+                  Icon(Icons.more_vert, size: 20, color: Colors.grey.shade400),
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
               itemBuilder: (_) => [
-                const PopupMenuItem(value: 'edit', child: Row(
-                  children: [
-                    Icon(Icons.edit_outlined, size: 18, color: Color(0xFF3B3BF9)),
-                    SizedBox(width: 8),
-                    Text('Edit'),
-                  ],
-                )),
-                const PopupMenuItem(value: 'copy', child: Row(
-                  children: [
-                    Icon(Icons.copy_outlined, size: 18, color: Color(0xFF6B7280)),
-                    SizedBox(width: 8),
-                    Text('Copy as New'),
-                  ],
-                )),
-                const PopupMenuItem(value: 'delete', child: Row(
-                  children: [
-                    Icon(Icons.delete_outline, size: 18, color: Color(0xFFEF4444)),
-                    SizedBox(width: 8),
-                    Text('Delete', style: TextStyle(color: Color(0xFFEF4444))),
-                  ],
-                )),
+                const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_outlined,
+                            size: 18, color: Color(0xFF3B3BF9)),
+                        SizedBox(width: 8),
+                        Text('Edit'),
+                      ],
+                    )),
+                const PopupMenuItem(
+                    value: 'copy',
+                    child: Row(
+                      children: [
+                        Icon(Icons.copy_outlined,
+                            size: 18, color: Color(0xFF6B7280)),
+                        SizedBox(width: 8),
+                        Text('Copy as New'),
+                      ],
+                    )),
+                const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_outline,
+                            size: 18, color: Color(0xFFEF4444)),
+                        SizedBox(width: 8),
+                        Text('Delete',
+                            style: TextStyle(color: Color(0xFFEF4444))),
+                      ],
+                    )),
               ],
               onSelected: (action) {
                 switch (action) {
@@ -1145,7 +1344,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
+            style:
+                TextButton.styleFrom(foregroundColor: const Color(0xFFEF4444)),
             child: const Text('Delete'),
           ),
         ],

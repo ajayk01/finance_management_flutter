@@ -7,6 +7,7 @@ import 'add_subcategory_screen.dart';
 import 'analytics_screen.dart';
 import 'backup_schedule_screen.dart';
 import 'cc_statement_screen.dart';
+import 'credit_card_rewards_details_screen.dart';
 import 'local_server_screen.dart';
 import 'pay_cc_bill_screen.dart';
 import 'splitwise_screen.dart';
@@ -104,6 +105,17 @@ class ProfileScreen extends StatelessWidget {
               icon: Icons.credit_score_outlined,
               title: 'Add Credit Cap',
               onTap: () => AddCreditCapSheet.show(context),
+            ),
+            _buildOptionTile(
+              icon: Icons.card_giftcard_outlined,
+              title: 'Credit Card Rewards Details',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const CreditCardRewardsDetailsScreen()),
+                );
+              },
             ),
             _buildOptionTile(
               icon: Icons.payment_rounded,
@@ -204,7 +216,8 @@ class ProfileScreen extends StatelessWidget {
             color: Color(0xFF1E293B),
           ),
         ),
-        trailing: Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400, size: 22),
+        trailing: Icon(Icons.chevron_right_rounded,
+            color: Colors.grey.shade400, size: 22),
         onTap: onTap,
       ),
     );
