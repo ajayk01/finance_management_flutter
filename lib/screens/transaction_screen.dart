@@ -174,7 +174,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
       final requests = <Future<dynamic>>[
         DirectSqlService.getAllTransactions(month, year),
-        DirectSqlService.getAllCreditCardCaps(),
+        DirectSqlService.getAllCreditCardCaps(referenceDate: _currentDate),
       ];
       if (shouldFetchAccounts) {
         requests.add(DirectSqlService.getAllActiveAccounts());
@@ -839,12 +839,26 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
   Widget _buildCreditCardOverview(CreditCardAccount card) {
     final totalLimit = card.totalLimit;
-    final usedAmount = card.usedAmount.abs();
-    final availableCredit = card.availableCredit > 0
-        ? card.availableCredit
-        : (totalLimit - usedAmount).clamp(0, double.infinity).toDouble();
-    final utilization =
-        totalLimit <= 0 ? 0.0 : (usedAmount / totalLimit).clamp(0.0, 1.0);
+    final cardCaps = _creditCardCaps
+      .where((cap) => cap.creditCardId == card.id)
+      .toList();
+    final totalUsed = card.usedAmount.abs();
+    final availableCredit =
+      (totalLimit - totalUsed).clamp(0, double.infinity).toDouble();
+    final totalRewards = cardCaps.fold<double>(
+      0,
+      (total, cap) => total + cap.totalRewards,
+    );
+    final currentMonthTotalRewards = cardCaps.fold<double>(
+      0,
+      (total, cap) => total + cap.capCurrentAmount,
+    );
+    final currentMonthBaseRewards = cardCaps
+        .where((cap) => cap.isBaseRewardCap)
+        .fold<double>(0, (total, cap) => total + cap.capCurrentAmount);
+    final currentMonthMultiplierRewards = cardCaps
+        .where((cap) => !cap.isBaseRewardCap)
+        .fold<double>(0, (total, cap) => total + cap.capCurrentAmount);
 
     return Container(
       width: double.infinity,
@@ -884,22 +898,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
                   ],
                 ),
               ),
-              Text('${(utilization * 100).round()}% used',
-                  style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF2563EB))),
             ],
-          ),
-          const SizedBox(height: 18),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: LinearProgressIndicator(
-              value: utilization,
-              minHeight: 10,
-              backgroundColor: const Color(0xFFE5E7EB),
-              valueColor: const AlwaysStoppedAnimation(Color(0xFF2563EB)),
-            ),
           ),
           const SizedBox(height: 18),
           LayoutBuilder(
@@ -911,13 +910,31 @@ class _TransactionScreenState extends State<TransactionScreen> {
                 children: [
                   _buildCreditCardMetric('Total limit', totalLimit,
                       const Color(0xFF1E293B), itemWidth),
-                  _buildCreditCardMetric(
-                      'Used', usedAmount, const Color(0xFF2563EB), itemWidth),
                   _buildCreditCardMetric('Available', availableCredit,
                       const Color(0xFF16A34A), itemWidth),
-                  _buildCreditCardMetric('Reward points', card.rewardPoints,
+                    _buildCreditCardMetric('Total rewards', totalRewards,
                       const Color(0xFF7C3AED), itemWidth,
                       isCurrency: false),
+                    _buildCreditCardMetric(
+                      'Current month total rewards',
+                      currentMonthTotalRewards,
+                      const Color(0xFF2563EB),
+                      itemWidth,
+                      isCurrency: false),
+                    _buildCreditCardMetric(
+                      'Current month base rewards',
+                      currentMonthBaseRewards,
+                      const Color(0xFF16A34A),
+                      itemWidth,
+                      isCurrency: false),
+                    _buildCreditCardMetric(
+                      'Current month multiplier rewards',
+                      currentMonthMultiplierRewards,
+                      const Color(0xFFF59E0B),
+                      itemWidth,
+                      isCurrency: false),
+                  _buildCreditCardMetric('Total used', totalUsed,
+                      const Color(0xFF0F766E), itemWidth),
                 ],
               );
             },
@@ -1201,9 +1218,12 @@ class _TransactionScreenState extends State<TransactionScreen> {
         break;
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
+    return InkWell(
+      onTap: t.model == null ? null : () => _showTransactionDetails(t.model!),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
         children: [
           // Icon / Avatar
           if (t.avatarUrl != null)
@@ -1326,6 +1346,122 @@ class _TransactionScreenState extends State<TransactionScreen> {
                 }
               },
             ),
+        ],
+        ),
+      ),
+    );
+  }
+
+  void _showTransactionDetails(TransactionModel tx) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.62,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: ListView(
+            controller: scrollController,
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD1D5DB),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                tx.description.isEmpty ? 'Transaction details' : tx.description,
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                [tx.date, if (tx.time != null) tx.time!].join(' at '),
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+              ),
+              const SizedBox(height: 20),
+              _buildTransactionDetailRow('Amount', formatINR(tx.amount.abs())),
+              _buildTransactionDetailRow('Type', tx.type),
+              _buildTransactionDetailRow('Category', tx.category ?? 'Uncategorized'),
+              if (tx.subCategory != null && tx.subCategory!.isNotEmpty)
+                _buildTransactionDetailRow('Subcategory', tx.subCategory!),
+              const SizedBox(height: 20),
+              const Text('Account details',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              _buildTransactionDetailRow('Account', tx.accountName ?? 'Not specified'),
+              if (tx.accountId != null && tx.accountId!.isNotEmpty)
+                _buildTransactionDetailRow('Account ID', tx.accountId!),
+              if (tx.type.toLowerCase() == 'transfer' &&
+                  tx.subCategory != null &&
+                  tx.subCategory!.isNotEmpty)
+                _buildTransactionDetailRow('To account', tx.subCategory!),
+              if (tx.investmentAccountName != null &&
+                  tx.investmentAccountName!.isNotEmpty)
+                _buildTransactionDetailRow('Investment account', tx.investmentAccountName!),
+              const SizedBox(height: 20),
+              const Text('Rewards',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              _buildTransactionDetailRow(
+                  'Reward points', tx.rewards.toStringAsFixed(0)),
+              const SizedBox(height: 20),
+              const Text('Splitwise',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              if (tx.splitwiseDetails == null || tx.splitwiseDetails!.isEmpty)
+                Text('No Splitwise details',
+                    style: TextStyle(fontSize: 14, color: Colors.grey.shade500))
+              else
+                ...tx.splitwiseDetails!.map((detail) {
+                  final splitwiseDetail = Map<String, dynamic>.from(detail as Map);
+                  final amount = _toDetailDouble(splitwiseDetail['splitedAmount']);
+                  final settled = splitwiseDetail['isSettled'] == true;
+                  return _buildTransactionDetailRow(
+                    splitwiseDetail['friendName']?.toString() ?? 'Splitwise member',
+                    '${formatINR(amount)} ${settled ? 'settled' : 'pending'}',
+                  );
+                }),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  double _toDetailDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  Widget _buildTransactionDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(label,
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
+          ),
+          const SizedBox(width: 16),
+          Flexible(
+            child: Text(value,
+                textAlign: TextAlign.end,
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+          ),
         ],
       ),
     );

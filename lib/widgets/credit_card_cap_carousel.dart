@@ -36,6 +36,7 @@ class _CreditCardCapOverview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final usedAmount = cap.capCurrentAmount;
+    final totalSpend = cap.capCurrentSpend;
     final totalAmount = cap.capTotalAmount;
     final remainingAmount = cap.remainingAmount.clamp(0, double.infinity);
     final utilization =
@@ -71,7 +72,9 @@ class _CreditCardCapOverview extends StatelessWidget {
                     style: const TextStyle(
                         fontSize: 15, fontWeight: FontWeight.w700)),
               ),
-              Text('${(utilization * 100).round()}% used',
+                Text('${formatINR(totalSpend, decimals: 0)} spend',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,

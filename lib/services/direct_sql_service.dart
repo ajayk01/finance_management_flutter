@@ -748,6 +748,9 @@ WHERE ID = :id
         "t.SUB_CATEGORY_ID AS sub_category_id, "
         "t.FROM_ACCOUNT_ID AS from_account_id, "
         "t.TO_ACCOUNT_ID AS to_account_id, "
+        "(SELECT COALESCE(SUM(cct.Rewards), 0) "
+        "FROM CreditCardTransactions cct "
+        "WHERE cct.TransactionId = t.ID) AS rewards, "
         "c.CATEGORY_NAME AS category_name, "
         "s.SUB_CATEGORY_NAME AS sub_category_name, "
         "fa.ACCOUNT_NAME AS from_account_name, "
@@ -839,8 +842,19 @@ WHERE ID = :id
   }
 
   static Future<ActiveAccountsResult> getAllActiveAccounts() async {
-    String sql =
-        "SELECT ID,ACCOUNT_NAME,CURRENT_BALANCE, INITIAL_BALANCE, ACCOUNT_TYPE, IMG FROM Accounts WHERE IS_ACTIVE = 1";
+    const sql = '''
+SELECT
+  a.ID,
+  a.ACCOUNT_NAME,
+  a.CURRENT_BALANCE,
+  a.INITIAL_BALANCE,
+  a.ACCOUNT_TYPE,
+  a.IMG,
+  ccd.TOTAL_LIMIT AS CREDIT_CARD_TOTAL_LIMIT
+FROM Accounts a
+LEFT JOIN CreditCardDetails ccd ON ccd.CREDIT_CARD_ID = a.ID
+WHERE a.IS_ACTIVE = 1
+''';
     MySqlConfig config = MySqlConfig.fromDotEnv();
     MySqlService service = MySqlService();
     await service.connect(config);
@@ -871,8 +885,11 @@ WHERE ID = :id
             'id': rowMap['ID'],
             'name': rowMap['ACCOUNT_NAME'],
             'usedAmount': rowMap['CURRENT_BALANCE'],
-            'totalLimit': rowMap['INITIAL_BALANCE'],
-            'availableCredit': 0,
+            'totalLimit': rowMap['CREDIT_CARD_TOTAL_LIMIT'],
+            'availableCredit': (_toDouble(rowMap['CREDIT_CARD_TOTAL_LIMIT']) -
+                _toDouble(rowMap['CURRENT_BALANCE']))
+              .clamp(0, double.infinity)
+              .toDouble(),
             'rewardPoints': 0,
             'isActive': true,
             'logo': rowMap['IMG'],
@@ -1002,6 +1019,7 @@ WHERE ID = :id
         'date': rowMap['date'],
         'description': rowMap['description'] ?? '',
         'amount': rowMap['amount'],
+        'rewards': rowMap['rewards'],
         'type': type,
         'category': isTransfer
             ? 'Transfer'
@@ -1353,19 +1371,86 @@ WHERE ID = :id
   /// Returns List of CreditCardCap objects
   static Future<List<CreditCardCap>> getAllCreditCardCaps({
     String? creditCardId,
+    DateTime? referenceDate,
   }) async {
+    final cycleDate = referenceDate ?? DateTime.now();
+    final cycleDateSql = '${cycleDate.year.toString().padLeft(4, '0')}-'
+        '${cycleDate.month.toString().padLeft(2, '0')}-'
+        '${cycleDate.day.toString().padLeft(2, '0')}';
     String sql = '''
+        WITH billing_cycles AS (
+          SELECT
+            CREDIT_CARD_ID,
+            CASE
+              WHEN DAY(DATE('$cycleDateSql')) <= BILL_GENERATION_DATE THEN
+                CASE
+                  WHEN MONTH(DATE('$cycleDateSql')) = 2
+                    AND DAY(LAST_DAY(DATE('$cycleDateSql'))) = 28
+                    AND BILL_GENERATION_DATE = 28
+                    THEN DATE_FORMAT(DATE('$cycleDateSql'), '%Y-%m-01')
+                  ELSE DATE_ADD(
+                    DATE_SUB(DATE_FORMAT(DATE('$cycleDateSql'), '%Y-%m-01'), INTERVAL 1 MONTH),
+                    INTERVAL BILL_GENERATION_DATE DAY
+                  )
+                END
+              ELSE DATE_ADD(
+                DATE_FORMAT(DATE('$cycleDateSql'), '%Y-%m-01'),
+                INTERVAL BILL_GENERATION_DATE DAY
+              )
+            END AS cycle_start,
+            CASE
+              WHEN DAY(DATE('$cycleDateSql')) <= BILL_GENERATION_DATE THEN DATE_ADD(
+                DATE_FORMAT(DATE('$cycleDateSql'), '%Y-%m-01'),
+                INTERVAL BILL_GENERATION_DATE DAY
+              )
+              ELSE DATE_ADD(
+                DATE_ADD(DATE_FORMAT(DATE('$cycleDateSql'), '%Y-%m-01'), INTERVAL 1 MONTH),
+                INTERVAL BILL_GENERATION_DATE DAY
+              )
+            END AS cycle_end
+          FROM CreditCardDetails
+          WHERE BILL_GENERATION_DATE IS NOT NULL
+        ),
+        card_spending AS (
+          SELECT
+            bc.CREDIT_CARD_ID,
+            COALESCE(SUM(t.AMOUNT), 0) AS card_current_spend
+          FROM billing_cycles bc
+          LEFT JOIN Transactions t
+            ON t.FROM_ACCOUNT_ID = bc.CREDIT_CARD_ID
+            AND t.DATE >= UNIX_TIMESTAMP(bc.cycle_start) * 1000
+            AND t.DATE < UNIX_TIMESTAMP(bc.cycle_end) * 1000
+          GROUP BY bc.CREDIT_CARD_ID
+        )
             SELECT 
                 cccd.ID as id,
                 cccd.CREDIT_CARD_ID as credit_card_id,
                 cccd.CAP_NAME as cap_name,
                 cccd.CAP_TOTAL_AMOUNT as cap_total_amount,
                 cccd.CAP_PERCENTAGE as cap_percentage,
-                cccd.CAP_CURRENT_AMOUNT as cap_current_amount,
+                    cccd.IS_BASE_REWARD_CAP as is_base_reward_cap,
+          COALESCE(SUM(CASE
+            WHEN t.DATE >= UNIX_TIMESTAMP(bc.cycle_start) * 1000
+              AND t.DATE < UNIX_TIMESTAMP(bc.cycle_end) * 1000
+            THEN cct.Rewards
+            ELSE 0
+          END), 0) as cap_current_amount,
+          COALESCE(SUM(CASE
+            WHEN t.DATE >= UNIX_TIMESTAMP(bc.cycle_start) * 1000
+              AND t.DATE < UNIX_TIMESTAMP(bc.cycle_end) * 1000
+            THEN t.AMOUNT
+            ELSE 0
+          END), 0) as cap_current_spend,
+                cs.card_current_spend as card_current_spend,
                 cccd.REWARD_PER_AMOUNT as reward_per_amount,
                 COALESCE(SUM(cct.Rewards), 0) as total_rewards
             FROM CreditCardCapDetails cccd
+        INNER JOIN billing_cycles bc
+          ON bc.CREDIT_CARD_ID = cccd.CREDIT_CARD_ID
+        INNER JOIN card_spending cs
+          ON cs.CREDIT_CARD_ID = cccd.CREDIT_CARD_ID
             LEFT JOIN CreditCardTransactions cct ON cct.CapId = cccd.ID
+        LEFT JOIN Transactions t ON t.ID = cct.TransactionId
             WHERE 1=1
         ''';
 
@@ -1376,7 +1461,8 @@ WHERE ID = :id
 
     sql += ' GROUP BY cccd.ID, cccd.CREDIT_CARD_ID, cccd.CAP_NAME, '
         'cccd.CAP_TOTAL_AMOUNT, cccd.CAP_PERCENTAGE, '
-        'cccd.CAP_CURRENT_AMOUNT, cccd.REWARD_PER_AMOUNT '
+      'cccd.IS_BASE_REWARD_CAP, '
+    'cccd.REWARD_PER_AMOUNT, cs.card_current_spend '
         'ORDER BY cccd.CAP_NAME ASC';
 
     try {
@@ -1402,7 +1488,10 @@ WHERE ID = :id
         final capName = rowMap['cap_name']?.toString() ?? '';
         final capTotalAmount = _toDouble(rowMap['cap_total_amount']);
         final capPercentage = _toDouble(rowMap['cap_percentage']);
+        final isBaseRewardCap = _toDouble(rowMap['is_base_reward_cap']) == 1;
         final capCurrentAmount = _toDouble(rowMap['cap_current_amount']);
+        final capCurrentSpend = _toDouble(rowMap['cap_current_spend']);
+        final cardCurrentSpend = _toDouble(rowMap['card_current_spend']);
         final rewardPerAmount = _toDouble(rowMap['reward_per_amount']);
         final totalRewards = _toDouble(rowMap['total_rewards']);
 
@@ -1417,9 +1506,12 @@ WHERE ID = :id
             capTotalAmount: capTotalAmount,
             capPercentage: capPercentage,
             capCurrentAmount: capCurrentAmount,
+            capCurrentSpend: capCurrentSpend,
+            cardCurrentSpend: cardCurrentSpend,
             remainingAmount: remainingAmount,
             totalRewards: totalRewards,
             rewardPerAmount: rewardPerAmount > 0 ? rewardPerAmount : 100,
+            isBaseRewardCap: isBaseRewardCap,
           ),
         );
       }

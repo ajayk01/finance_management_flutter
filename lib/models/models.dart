@@ -109,6 +109,7 @@ class TransactionModel {
   final String description;
   final double amount;
   final double charges;
+  final double rewards;
   final String type;
   final String? category;
   final String? subCategory;
@@ -131,6 +132,7 @@ class TransactionModel {
     required this.description,
     required this.amount,
     this.charges = 0,
+    this.rewards = 0,
     required this.type,
     this.category,
     this.subCategory,
@@ -162,6 +164,7 @@ class TransactionModel {
         description: json['description'] ?? '',
         amount: _toDouble(json['amount']),
         charges: _toDouble(json['charges']),
+        rewards: _toDouble(json['rewards']),
         type: json['type'] ?? '',
         category: json['category'],
         subCategory: json['subCategory'],
@@ -333,9 +336,12 @@ class CreditCardCap {
   final double capTotalAmount;
   final double capPercentage;
   final double capCurrentAmount;
+  final double capCurrentSpend;
+  final double cardCurrentSpend;
   final double remainingAmount;
   final double totalRewards;
   final double rewardPerAmount;
+  final bool isBaseRewardCap;
 
   CreditCardCap({
     required this.id,
@@ -344,9 +350,12 @@ class CreditCardCap {
     required this.capTotalAmount,
     required this.capPercentage,
     this.capCurrentAmount = 0,
+    this.capCurrentSpend = 0,
+    this.cardCurrentSpend = 0,
     this.remainingAmount = 0,
     this.totalRewards = 0,
     this.rewardPerAmount = 100,
+    this.isBaseRewardCap = false,
   });
 
   factory CreditCardCap.fromJson(Map<String, dynamic> json) => CreditCardCap(
@@ -356,9 +365,12 @@ class CreditCardCap {
         capTotalAmount: _toDouble(json['capTotalAmount']),
         capPercentage: _toDouble(json['capPercentage']),
         capCurrentAmount: _toDouble(json['capCurrentAmount']),
+        capCurrentSpend: _toDouble(json['capCurrentSpend']),
+        cardCurrentSpend: _toDouble(json['cardCurrentSpend']),
         remainingAmount: _toDouble(json['remainingAmount']),
         totalRewards: _toDouble(json['totalRewards']),
         rewardPerAmount: _toDouble(json['rewardPerAmount'] ?? 100),
+        isBaseRewardCap: _toDouble(json['isBaseRewardCap']) == 1,
       );
 }
 
