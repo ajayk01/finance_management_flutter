@@ -275,6 +275,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
         incomeByCategory: incByCat,
       );
 
+      // Store credit card caps in cache
+      cache.setCreditCardCaps(creditCardCaps);
+
       if (mounted) {
         setState(() {
           _transactions = txList;

@@ -166,6 +166,32 @@ class AppDataCache {
     _totalInvestmentCache.clear();
   }
 
+  // ─── Invalidate specific caches ───────────────────────────
+
+  void invalidateCapsCache() {
+    _creditCardCaps = [];
+    _capsLoaded = false;
+  }
+
+  void invalidateAccountsCache() {
+    _bankAccounts = [];
+    _creditCardAccounts = [];
+    _investmentAccounts = [];
+    _accountsLoaded = false;
+  }
+
+  void invalidateCategoriesCache() {
+    _categories = [];
+    _categoriesLoaded = false;
+  }
+
+  // ─── Direct setters for cache ────────────────────────────
+
+  void setCreditCardCaps(List<CreditCardCap> caps) {
+    _creditCardCaps = caps;
+    _capsLoaded = true;
+  }
+
   void updateAccountsFromModels({
     required List<BankAccount> bankAccounts,
     required List<CreditCardAccount> creditCardAccounts,

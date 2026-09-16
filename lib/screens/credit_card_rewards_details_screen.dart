@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import '../services/app_data_cache.dart';
 import '../services/direct_sql_service.dart';
 import '../widgets/credit_card_cap_carousel.dart';
 
@@ -37,6 +38,8 @@ class _CreditCardRewardsDetailsScreenState
         _caps = results[1] as List<CreditCardCap>;
         _loading = false;
       });
+      // Update cache with fresh caps
+      AppDataCache().setCreditCardCaps(_caps);
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }

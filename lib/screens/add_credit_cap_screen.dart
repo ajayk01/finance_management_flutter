@@ -88,6 +88,9 @@ class _AddCreditCapSheetState extends State<AddCreditCapSheet> {
         rewardPerAmount: rewardPer,
       );
 
+      // Refresh the cache to pick up the new cap in other screens
+      await _cache.refreshCaps();
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
