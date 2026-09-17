@@ -15,6 +15,7 @@ class _MCCCodeScreenState extends State<MCCCodeScreen> {
   
   bool _loading = true;
   bool _submitting = false;
+  int? _editingId;
   List<Map<String, dynamic>> _mccCodes = [];
 
   @override
@@ -62,20 +63,41 @@ class _MCCCodeScreenState extends State<MCCCodeScreen> {
       final mccCode = int.tryParse(_mccCodeController.text.trim()) ?? 0;
       final name = _nameController.text.trim();
 
-      await DirectSqlService.createMCCCode(
-        mccCode: mccCode,
-        name: name,
-      );
+      if (_editingId != null) {
+        await DirectSqlService.updateMCCCode(
+          id: _editingId!,
+          mccCode: mccCode,
+          name: name,
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('MCC code updated successfully'),
+              backgroundColor: Color(0xFF22C55E),
+            ),
+          );
+        }
+      } else {
+        await DirectSqlService.createMCCCode(
+          mccCode: mccCode,
+          name: name,
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('MCC code added successfully'),
+              backgroundColor: Color(0xFF22C55E),
+            ),
+          );
+        }
+      }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('MCC code added successfully'),
-            backgroundColor: Color(0xFF22C55E),
-          ),
-        );
         _mccCodeController.clear();
         _nameController.clear();
+        _editingId = null;
         _loadMCCCodes();
       }
     } catch (e) {
@@ -90,6 +112,14 @@ class _MCCCodeScreenState extends State<MCCCodeScreen> {
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  void _cancelEdit() {
+    setState(() {
+      _editingId = null;
+      _mccCodeController.clear();
+      _nameController.clear();
+    });
   }
 
   Future<void> _deleteMCCCode(int id) async {
@@ -130,108 +160,126 @@ class _MCCCodeScreenState extends State<MCCCodeScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(20),
                 children: [
-                  _buildAddForm(),
-                  const SizedBox(height: 30),
                   _buildMCCCodesList(),
                 ],
               ),
             ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showMCCForm(),
+        backgroundColor: const Color(0xFF2563EB),
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text('Add'),
+      ),
     );
   }
 
-  Widget _buildAddForm() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+  void _showMCCForm([Map<String, dynamic>? code]) {
+    final isEdit = code != null;
+    final id = isEdit ? int.tryParse(code['id']?.toString() ?? '') : null;
+
+    if (isEdit && id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to edit this MCC code. Invalid ID.'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    _editingId = id;
+    _mccCodeController.text = isEdit ? (code['mcc_code']?.toString() ?? '') : '';
+    _nameController.text = isEdit ? (code['name']?.toString() ?? '') : '';
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(isEdit ? 'Edit MCC Code' : 'Add New MCC Code'),
+        content: Form(
+          key: _formKey,
+          child: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _mccCodeController,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: 'MCC Code',
+                      hintText: 'e.g., 5411',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'MCC code is required';
+                      }
+                      final codeValue = int.tryParse(value.trim());
+                      if (codeValue == null || codeValue <= 0) {
+                        return 'Enter a valid MCC code';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _nameController,
+                    decoration: InputDecoration(
+                      labelText: 'Description',
+                      hintText: 'e.g., Grocery Stores',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Description is required';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _cancelEdit();
+            },
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: _submitting ? null : () async {
+              Navigator.pop(dialogContext);
+              await _submitForm();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2563EB),
+            ),
+            child: _submitting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : Text(
+                    isEdit ? 'Update' : 'Add',
+                    style: const TextStyle(color: Colors.white),
+                  ),
           ),
         ],
-      ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Add New MCC Code',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _mccCodeController,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'MCC Code',
-                hintText: 'e.g., 5411',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'MCC code is required';
-                }
-                final code = int.tryParse(value.trim());
-                if (code == null || code <= 0) {
-                  return 'Enter a valid MCC code';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _nameController,
-              decoration: InputDecoration(
-                labelText: 'Description',
-                hintText: 'e.g., Grocery Stores',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'Description is required';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _submitting ? null : _submitForm,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  backgroundColor: const Color(0xFF2563EB),
-                  disabledBackgroundColor: Colors.grey[300],
-                ),
-                child: _submitting
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      )
-                    : const Text(
-                        'Add MCC Code',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -274,9 +322,9 @@ class _MCCCodeScreenState extends State<MCCCodeScreen> {
   }
 
   Widget _buildMCCCodeItem(Map<String, dynamic> code) {
-    final id = code['id'];
-    final mccCode = code['mcc_code'];
-    final name = code['name'];
+    final id = int.tryParse(code['id']?.toString() ?? '') ?? 0;
+    final mccCode = int.tryParse(code['mcc_code']?.toString() ?? '') ?? 0;
+    final name = code['name']?.toString() ?? '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -310,11 +358,22 @@ class _MCCCodeScreenState extends State<MCCCodeScreen> {
               ],
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.delete, color: Color(0xFFEF4444)),
-            onPressed: () {
-              _showDeleteConfirmation(id, mccCode);
-            },
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.edit_outlined, color: Color(0xFF2563EB)),
+                onPressed: () {
+                  _showMCCForm(code);
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete, color: Color(0xFFEF4444)),
+                onPressed: () {
+                  _showDeleteConfirmation(id, mccCode);
+                },
+              ),
+            ],
           ),
         ],
       ),
@@ -322,6 +381,16 @@ class _MCCCodeScreenState extends State<MCCCodeScreen> {
   }
 
   void _showDeleteConfirmation(int id, int mccCode) {
+    if (id <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to delete this MCC code. Invalid ID.'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

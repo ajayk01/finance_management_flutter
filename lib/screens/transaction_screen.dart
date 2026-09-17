@@ -438,8 +438,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
       ));
     }
 
-    final groups = <DayGroup>[];
-    final sortedDates = dayMap.keys.toList()..sort((a, b) => b.compareTo(a));
+    final groups = <DayGroup>[];    final sortedDates = dayMap.keys.toList()..sort((a, b) => b.compareTo(a));
     for (final dateStr in sortedDates) {
       try {
         final dt = DateTime.parse(dateStr);
