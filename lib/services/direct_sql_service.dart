@@ -823,6 +823,9 @@ WHERE ID = :id
         "(SELECT COALESCE(SUM(cct.REWARDS), 0) "
         "FROM CreditCardTransactions cct "
         "WHERE cct.TRANSACTION_ID = t.ID) AS rewards, "
+        "(SELECT COALESCE(cct.MCC_ID, NULL) "
+        "FROM CreditCardTransactions cct "
+        "WHERE cct.TRANSACTION_ID = t.ID LIMIT 1) AS mccCodeId, "
         "c.CATEGORY_NAME AS category_name, "
         "s.SUB_CATEGORY_NAME AS sub_category_name, "
         "fa.ACCOUNT_NAME AS from_account_name, "
@@ -910,6 +913,7 @@ WHERE ID = :id
       'splitwiseDetails': splitwiseDetails,
       'splitwiseUserIds': splitwiseUserIds,
       'includeSplitwise': splitwiseDetails.isNotEmpty,
+      'mccCodeId': rowMap['mccCodeId']?.toString(),
     });
   }
 
@@ -1008,6 +1012,9 @@ WHERE a.IS_ACTIVE = 1
         "(SELECT COALESCE(SUM(cct.REWARDS), 0) "
         "FROM CreditCardTransactions cct "
         "WHERE cct.TRANSACTION_ID = t.ID) AS rewards, "
+        "(SELECT COALESCE(cct.MCC_ID, NULL) "
+        "FROM CreditCardTransactions cct "
+        "WHERE cct.TRANSACTION_ID = t.ID LIMIT 1) AS mccCodeId, "
         "c.CATEGORY_NAME AS category_name, "
         "s.SUB_CATEGORY_NAME AS sub_category_name, "
         "fa.ACCOUNT_NAME AS from_account_name, "

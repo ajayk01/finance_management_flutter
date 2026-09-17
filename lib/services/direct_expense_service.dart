@@ -17,6 +17,7 @@ class DirectExpenseService {
     String? categoryId,
     String? subCategoryId,
     String? capId,
+    String? mccCodeId,
     bool includeSplitwise = false,
     String? splitwiseGroupId,
     List<String>? splitwiseUserIds,
@@ -125,6 +126,7 @@ class DirectExpenseService {
             creditCardId: parsedAccount.id.toString(),
             capId: capId,
             amount: amount,
+            mccCodeId: mccCodeId,
           );
         }
 
@@ -167,6 +169,7 @@ class DirectExpenseService {
     String? subCategoryId,
     String? description,
     String? capId,
+    String? mccCodeId,
     bool updateSplitwise = true,
     bool includeSplitwise = false,
     String? splitwiseGroupId,
@@ -175,38 +178,39 @@ class DirectExpenseService {
     Map<String, double>? customAmounts,
     Future<void> Function()? reauthenticateSplitwise,
   }) async {
-    final transactionId = int.tryParse(id);
-    if (transactionId == null || transactionId <= 0) {
-      throw ArgumentError('Invalid transaction id: $id');
-    }
-
-    final parsedAccount = _parseAccount(account);
-    final epochTime = _parseDateToEpoch(date);
-
-    final shouldUseSplitwise = includeSplitwise &&
-        splitwiseGroupId != null &&
-        splitwiseGroupId.trim().isNotEmpty &&
-        splitwiseUserIds != null &&
-        splitwiseUserIds.isNotEmpty;
-
-    final splitPayload = shouldUseSplitwise
-        ? _buildSplitPayload(
-            amount: amount,
-            splitwiseUserIds: splitwiseUserIds,
-            splitType: splitType,
-            customAmounts: customAmounts,
-          )
-        : null;
-
-    final config = MySqlConfig.fromDotEnv();
-    final service = MySqlService();
-    await service.connect(config);
-
     try {
-      await service.executeWriteQuery('START TRANSACTION');
+      final transactionId = int.tryParse(id);
+      if (transactionId == null || transactionId <= 0) {
+        throw ArgumentError('Invalid transaction id: $id');
+      }
+
+      final parsedAccount = _parseAccount(account);
+      final epochTime = _parseDateToEpoch(date);
+
+      final shouldUseSplitwise = includeSplitwise &&
+          splitwiseGroupId != null &&
+          splitwiseGroupId.trim().isNotEmpty &&
+          splitwiseUserIds != null &&
+          splitwiseUserIds.isNotEmpty;
+
+      final splitPayload = shouldUseSplitwise
+          ? _buildSplitPayload(
+              amount: amount,
+              splitwiseUserIds: splitwiseUserIds,
+              splitType: splitType,
+              customAmounts: customAmounts,
+            )
+          : null;
+
+      final config = MySqlConfig.fromDotEnv();
+      final service = MySqlService();
+      await service.connect(config);
+
       try {
-        await service.executeWriteQuery(
-          '''
+        await service.executeWriteQuery('START TRANSACTION');
+        try {
+          await service.executeWriteQuery(
+            '''
 UPDATE Transactions
 SET DATE = :date,
     NOTES = :notes,
@@ -218,161 +222,167 @@ SET DATE = :date,
     SUB_CATEGORY_ID = :subCategoryId
 WHERE ID = :id
 ''',
-          {
-            'date': epochTime,
-            'notes': (description ?? '').trim(),
-            'amount': amount,
-            'fromAccountId': parsedAccount.id,
-            'categoryId': int.parse(categoryId),
-            'subCategoryId': _parseNullableInt(subCategoryId),
-            'id': transactionId,
-            'transactionType': _transactionTypeExpense,
-          },
-        );
-
-        if (parsedAccount.type == 'Credit Card') {
-          await service.executeWriteQuery(
-            'DELETE FROM CreditCardTransactions WHERE TRANSACTION_ID = :id',
-            {'id': transactionId},
+            {
+              'date': epochTime,
+              'notes': (description ?? '').trim(),
+              'amount': amount,
+              'fromAccountId': parsedAccount.id,
+              'categoryId': int.parse(categoryId),
+              'subCategoryId': _parseNullableInt(subCategoryId),
+              'id': transactionId,
+              'transactionType': _transactionTypeExpense,
+            },
           );
 
-          if (capId != null && capId.trim().isNotEmpty) {
-            await createCreditCardTransaction(
-              service: service,
-              transactionId: transactionId,
-              creditCardId: parsedAccount.id.toString(),
-              capId: capId,
-              amount: amount,
+          if (parsedAccount.type == 'Credit Card') {
+            await service.executeWriteQuery(
+              'DELETE FROM CreditCardTransactions WHERE TRANSACTION_ID = :id',
+              {'id': transactionId},
             );
-          }
-        }
 
-        if (updateSplitwise) {
-          final existingSplitwiseRows = await service.executeReadQuery(
-            '''
+            if (capId != null && capId.trim().isNotEmpty) {
+              await createCreditCardTransaction(
+                service: service,
+                transactionId: transactionId,
+                creditCardId: parsedAccount.id.toString(),
+                capId: capId,
+                amount: amount,
+                mccCodeId: mccCodeId,
+              );
+            }
+          }
+
+          if (updateSplitwise) {
+            final existingSplitwiseRows = await service.executeReadQuery(
+              '''
 SELECT SPLITWISE_TRANSACTION_ID, FRIEND_ID, SPLITED_TRANSACTION_ID
 FROM SplitwiseTransactions
 WHERE TRANSACTION_ID = $transactionId
 ''',
-          );
-
-          final existingRows =
-              (existingSplitwiseRows['rows'] as List? ?? const <dynamic>[])
-                  .map((row) => Map<String, dynamic>.from(row as Map))
-                  .toList();
-
-          if (existingRows.isNotEmpty) {
-            final splitwiseIds = existingRows
-                .map((row) => row['SPLITWISE_TRANSACTION_ID']?.toString() ?? '')
-                .where((value) => value.isNotEmpty)
-                .toSet();
-
-            for (final splitwiseId in splitwiseIds) {
-              await _deleteSplitwiseExpense(
-                splitwiseId,
-                reauthenticate: reauthenticateSplitwise,
-              );
-            }
-
-            final dummyTxIds = existingRows
-                .map((row) => _toInt(row['SPLITED_TRANSACTION_ID']))
-                .where((id) => id != null)
-                .cast<int>()
-                .toSet();
-
-            await service.executeWriteQuery(
-              'DELETE FROM SplitwiseTransactions WHERE TRANSACTION_ID = :id',
-              {'id': transactionId},
             );
 
-            for (final dummyTxId in dummyTxIds) {
+            final existingRows =
+                (existingSplitwiseRows['rows'] as List? ?? const <dynamic>[])
+                    .map((row) => Map<String, dynamic>.from(row as Map))
+                    .toList();
+
+            if (existingRows.isNotEmpty) {
+              final splitwiseIds = existingRows
+                  .map((row) => row['SPLITWISE_TRANSACTION_ID']?.toString() ?? '')
+                  .where((value) => value.isNotEmpty)
+                  .toSet();
+
+              for (final splitwiseId in splitwiseIds) {
+                await _deleteSplitwiseExpense(
+                  splitwiseId,
+                  reauthenticate: reauthenticateSplitwise,
+                );
+              }
+
+              final dummyTxIds = existingRows
+                  .map((row) => _toInt(row['SPLITED_TRANSACTION_ID']))
+                  .where((id) => id != null)
+                  .cast<int>()
+                  .toSet();
+
               await service.executeWriteQuery(
-                'DELETE FROM Transactions WHERE ID = :id AND AMOUNT = 0',
-                {'id': dummyTxId},
-              );
-            }
-          }
-
-          if (shouldUseSplitwise && splitPayload != null) {
-            final splitwiseResponse = await _createSplitwiseExpense(
-              amount: splitPayload.total,
-              description: (description == null || description.trim().isEmpty)
-                  ? 'No description'
-                  : description,
-              groupId: splitwiseGroupId,
-              userIds: splitwiseUserIds,
-              splitType: 'custom',
-              customAmounts: splitPayload.customAmounts,
-              date: date,
-              reauthenticate: reauthenticateSplitwise,
-            );
-
-            final splitwiseTransactionId =
-                splitwiseResponse['expenses']?[0]?['id']?.toString() ??
-                    splitwiseResponse['id']?.toString();
-
-            if (splitwiseTransactionId != null) {
-              final userMapping = await _createSplitwiseToDbMapping(service);
-              final dummyTxId = await _insertDummyTransaction(
-                service: service,
-                epochTime: epochTime,
-                description: description,
-                categoryId: categoryId,
-                subCategoryId: subCategoryId,
+                'DELETE FROM SplitwiseTransactions WHERE TRANSACTION_ID = :id',
+                {'id': transactionId},
               );
 
-              for (final userId in splitwiseUserIds) {
-                if (_isCurrentUser(userId)) {
-                  continue;
-                }
-
-                final dbFriendId = userMapping[userId];
-                if (dbFriendId == null) {
-                  continue;
-                }
-
-                final splitAmount = splitPayload.customAmounts[userId];
-                if (splitAmount == null) {
-                  throw StateError('Custom amount not found for user $userId');
-                }
-
-                await _insertSplitwiseTransaction(
-                  service: service,
-                  splitwiseTransactionId: splitwiseTransactionId,
-                  transactionId: transactionId,
-                  friendId: dbFriendId,
-                  splitAmount: splitAmount,
-                  splitedTransactionId: dummyTxId,
+              for (final dummyTxId in dummyTxIds) {
+                await service.executeWriteQuery(
+                  'DELETE FROM Transactions WHERE ID = :id AND AMOUNT = 0',
+                  {'id': dummyTxId},
                 );
               }
             }
+
+            if (shouldUseSplitwise && splitPayload != null) {
+              final splitwiseResponse = await _createSplitwiseExpense(
+                amount: splitPayload.total,
+                description: (description == null || description.trim().isEmpty)
+                    ? 'No description'
+                    : description,
+                groupId: splitwiseGroupId,
+                userIds: splitwiseUserIds,
+                splitType: 'custom',
+                customAmounts: splitPayload.customAmounts,
+                date: date,
+                reauthenticate: reauthenticateSplitwise,
+              );
+
+              final splitwiseTransactionId =
+                  splitwiseResponse['expenses']?[0]?['id']?.toString() ??
+                      splitwiseResponse['id']?.toString();
+
+              if (splitwiseTransactionId != null) {
+                final userMapping = await _createSplitwiseToDbMapping(service);
+                final dummyTxId = await _insertDummyTransaction(
+                  service: service,
+                  epochTime: epochTime,
+                  description: description,
+                  categoryId: categoryId,
+                  subCategoryId: subCategoryId,
+                );
+
+                for (final userId in splitwiseUserIds) {
+                  if (_isCurrentUser(userId)) {
+                    continue;
+                  }
+
+                  final dbFriendId = userMapping[userId];
+                  if (dbFriendId == null) {
+                    continue;
+                  }
+
+                  final splitAmount = splitPayload.customAmounts[userId];
+                  if (splitAmount == null) {
+                    throw StateError('Custom amount not found for user $userId');
+                  }
+
+                  await _insertSplitwiseTransaction(
+                    service: service,
+                    splitwiseTransactionId: splitwiseTransactionId,
+                    transactionId: transactionId,
+                    friendId: dbFriendId,
+                    splitAmount: splitAmount,
+                    splitedTransactionId: dummyTxId,
+                  );
+                }
+              }
+            }
           }
-        }
 
-        if (charges > 0) {
-          final chargesCategory = await _getChargesCategoryIds(service);
-          await _insertExpenseTransaction(
-            service: service,
-            amount: charges,
-            epochTime: epochTime,
-            description: 'Charges for $id',
-            accountId: parsedAccount.id,
-            categoryId: chargesCategory.categoryId,
-            subCategoryId: chargesCategory.subCategoryId,
-          );
-        }
+          if (charges > 0) {
+            final chargesCategory = await _getChargesCategoryIds(service);
+            await _insertExpenseTransaction(
+              service: service,
+              amount: charges,
+              epochTime: epochTime,
+              description: 'Charges for $id',
+              accountId: parsedAccount.id,
+              categoryId: chargesCategory.categoryId,
+              subCategoryId: chargesCategory.subCategoryId,
+            );
+          }
 
-        await service.executeWriteQuery('COMMIT');
-        return {
-          'success': true,
-          'message': 'Expense updated successfully.',
-        };
-      } catch (error) {
-        await service.executeWriteQuery('ROLLBACK');
-        rethrow;
+          await service.executeWriteQuery('COMMIT');
+          return {
+            'success': true,
+            'message': 'Expense updated successfully.',
+          };
+        } catch (error) {
+          await service.executeWriteQuery('ROLLBACK');
+          rethrow;
+        }
+      } finally {
+        await service.disconnect();
       }
-    } finally {
-      await service.disconnect();
+    } catch (error, stackTrace) {
+      print('❌ updateExpense Error: $error');
+      print('Stack trace: $stackTrace');
+      rethrow;
     }
   }
 
@@ -586,6 +596,7 @@ INSERT INTO SplitwiseTransactions (
     required String creditCardId,
     required String capId,
     required double amount,
+    String? mccCodeId,
   }) async {
     final parsedCreditCardId = int.tryParse(creditCardId);
     final parsedCapId = int.tryParse(capId);
@@ -619,12 +630,14 @@ INSERT INTO CreditCardTransactions (
     TRANSACTION_ID,
     CREDIT_CARD_ID,
     CAP_ID,
-    REWARDS
+    REWARDS,
+    MCC_ID
 ) VALUES (
     :transactionId,
     :creditCardId,
     :capId,
-    :rewards
+    :rewards,
+    :mccId
 )
 ''',
       {
@@ -632,6 +645,7 @@ INSERT INTO CreditCardTransactions (
         'creditCardId': parsedCreditCardId,
         'capId': parsedCapId,
         'rewards': rewards,
+        'mccId': _parseMccId(mccCodeId),
       },
     );
 
@@ -811,6 +825,13 @@ INSERT INTO CreditCardTransactions (
   }
 
   static int? _parseNullableInt(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return null;
+    }
+    return int.tryParse(value);
+  }
+
+  static int? _parseMccId(String? value) {
     if (value == null || value.trim().isEmpty) {
       return null;
     }

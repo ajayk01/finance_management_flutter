@@ -124,6 +124,7 @@ class TransactionModel {
   final List<dynamic>? splitwiseUserIds;
   final bool includeSplitwise;
   final String? splitType;
+  final String? mccCodeId;
 
   TransactionModel({
     required this.id,
@@ -147,6 +148,7 @@ class TransactionModel {
     this.splitwiseUserIds,
     this.includeSplitwise = false,
     this.splitType,
+    this.mccCodeId,
   });
 
   factory TransactionModel.fromJson(Map<String, dynamic> json) {
@@ -179,6 +181,7 @@ class TransactionModel {
         splitwiseUserIds: json['splitwiseUserIds'] is List ? json['splitwiseUserIds'] : null,
         includeSplitwise: json['includeSplitwise'] == true,
         splitType: json['splitType']?.toString(),
+        mccCodeId: json['mccCodeId']?.toString(),
       );
   }
 

@@ -40,6 +40,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   String _selectedFromAccount = '';
   String _selectedToAccount = '';
   String _selectedCreditCardCapId = '';
+  String _selectedMccCodeId = '';
   String? _fromAccountError;
   String? _toAccountError;
 
@@ -51,6 +52,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   List<CreditCardAccount> _creditCards = [];
   List<InvestmentAccount> _investmentAccounts = [];
   List<CreditCardCap> _creditCardCaps = [];
+  List<Map<String, dynamic>> _mccCodes = [];
   List<SplitwiseGroup> _splitwiseGroups = [];
 
   static const _typeLabels = ['Income', 'Expense', 'Transfer', 'Investment'];
@@ -146,6 +148,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       if (tx.investmentAccountName != null) _selectedToAccount = tx.investmentAccountName!;
     }
 
+    // MCC Code (if credit card transaction)
+    if (tx.mccCodeId != null && tx.mccCodeId!.isNotEmpty) {
+      _selectedMccCodeId = tx.mccCodeId!;
+    }
+
     // Splitwise details
     final sw = tx.splitwiseDetails;
     if (sw != null && sw.isNotEmpty) {
@@ -222,6 +229,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     required List<InvestmentAccount> invs,
     required List<CreditCardCap> caps,
     required List<SplitwiseGroup> groups,
+    required List<Map<String, dynamic>> mccCodes,
   }) {
     if (!mounted) return;
     setState(() {
@@ -230,6 +238,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _creditCards = cards;
       _investmentAccounts = invs;
       _creditCardCaps = caps;
+      _mccCodes = mccCodes;
       _splitwiseGroups = groups;
       if (cats.isNotEmpty && _selectedCategory.isEmpty) {
         _selectedCategory = cats.first.name;
@@ -326,14 +335,31 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     final cache = AppDataCache();
     await cache.loadFromLocal();
 
-    _applyFormData(
-      cats: cache.categories,
-      banks: cache.bankAccounts,
-      cards: cache.creditCardAccounts,
-      invs: cache.investmentAccounts,
-      caps: cache.creditCardCaps,
-      groups: cache.splitwiseGroups,
-    );
+    try {
+      final mccCodes = await DirectSqlService.getAllMCCCodes();
+      if (mounted) {
+        _applyFormData(
+          cats: cache.categories,
+          banks: cache.bankAccounts,
+          cards: cache.creditCardAccounts,
+          invs: cache.investmentAccounts,
+          caps: cache.creditCardCaps,
+          groups: cache.splitwiseGroups,
+          mccCodes: mccCodes,
+        );
+      }
+    } catch (e) {
+      print('Error loading MCC codes: $e');
+      _applyFormData(
+        cats: cache.categories,
+        banks: cache.bankAccounts,
+        cards: cache.creditCardAccounts,
+        invs: cache.investmentAccounts,
+        caps: cache.creditCardCaps,
+        groups: cache.splitwiseGroups,
+        mccCodes: [],
+      );
+    }
   }
 
   Future<void> _toggleSplitwise() async {
@@ -745,6 +771,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               categoryId: body['categoryId'] as String,
               subCategoryId: body['subCategoryId']?.toString(),
               capId: body['capId']?.toString(),
+              mccCodeId: _selectedMccCodeId.trim().isNotEmpty 
+                  ? _selectedMccCodeId 
+                  : null,
               updateSplitwise: true,
               includeSplitwise: body['includeSplitwise'] == true,
               splitwiseGroupId: body['splitwiseGroupId']?.toString(),
@@ -861,6 +890,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             subCategoryId: subCatObj.id,
             capId: _isCreditCard && _selectedCreditCardCapId.trim().isNotEmpty
                 ? _selectedCreditCardCapId
+                : null,
+            mccCodeId: _isCreditCard && _selectedMccCodeId.trim().isNotEmpty
+                ? _selectedMccCodeId
                 : null,
             includeSplitwise: _showSplitwise,
             splitwiseGroupId: _showSplitwise && _splitwiseGroups.isNotEmpty
@@ -1179,6 +1211,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 // ── Credit Cap ──
                 if (_isCreditCard) ...[
                   _buildCreditCardCapField(),
+                  const SizedBox(height: 16),
+                  // ── MCC Code ──
+                  _buildMccCodeField(),
                   const SizedBox(height: 16),
                 ],
 
@@ -1719,6 +1754,34 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
   }
 
+  Widget _buildMccCodeField() {
+    Map<String, dynamic>? selectedMccCode;
+    if (_selectedMccCodeId.isNotEmpty) {
+      try {
+        selectedMccCode = _mccCodes.firstWhere(
+          (code) => code['id'].toString() == _selectedMccCodeId,
+          orElse: () => <String, dynamic>{},
+        );
+        if (selectedMccCode.isEmpty) {
+          selectedMccCode = null;
+        }
+      } catch (_) {
+        selectedMccCode = null;
+      }
+    }
+
+    final mccLabel = selectedMccCode != null
+        ? '${selectedMccCode['mcc_code']} - ${selectedMccCode['name']}'
+        : 'Select MCC Code (Optional)';
+
+    return _buildTappableField(
+      label: 'MCC Code',
+      value: mccLabel,
+      icon: Icons.category_outlined,
+      onTap: _mccCodes.isNotEmpty ? _showMccCodePicker : null,
+    );
+  }
+
   // ── Submit Button ──
   Widget _buildSubmitButton() {
     return SizedBox(
@@ -1955,6 +2018,149 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           ),
         );
       },
+    );
+  }
+
+  void _showMccCodePicker() {
+    if (_mccCodes.isEmpty) return;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.7,
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Select MCC Code',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1E293B),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _mccCodes.length,
+                  itemBuilder: (context, index) {
+                    final code = _mccCodes[index];
+                    final codeId = code['id'].toString();
+                    final mccCode = code['mcc_code'];
+                    final name = code['name'];
+                    final selected = _selectedMccCodeId == codeId;
+
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? const Color(0xFF3B3BF9).withValues(alpha: 0.1)
+                              : const Color(0xFFF3F4F6),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          Icons.category,
+                          size: 20,
+                          color: selected
+                              ? const Color(0xFF3B3BF9)
+                              : Colors.grey.shade600,
+                        ),
+                      ),
+                      title: Text(
+                        '$mccCode - $name',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight:
+                              selected ? FontWeight.w600 : FontWeight.w500,
+                          color: selected
+                              ? const Color(0xFF3B3BF9)
+                              : const Color(0xFF1E293B),
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Code: $mccCode',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                      trailing: selected
+                          ? const Icon(Icons.check_circle,
+                              color: Color(0xFF3B3BF9), size: 22)
+                          : Icon(Icons.circle_outlined,
+                              color: Colors.grey.shade300, size: 22),
+                      onTap: () {
+                        setState(() {
+                          _selectedMccCodeId = codeId;
+                        });
+                        Navigator.pop(ctx);
+                      },
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              _buildClearMccButton(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildClearMccButton() {
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedMccCodeId = '';
+        });
+        Navigator.pop(context);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(color: Colors.grey.shade200),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.clear, size: 20, color: Colors.grey.shade600),
+            const SizedBox(width: 12),
+            Text(
+              'Clear Selection',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
