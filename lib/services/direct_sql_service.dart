@@ -748,9 +748,9 @@ WHERE ID = :id
         "t.SUB_CATEGORY_ID AS sub_category_id, "
         "t.FROM_ACCOUNT_ID AS from_account_id, "
         "t.TO_ACCOUNT_ID AS to_account_id, "
-        "(SELECT COALESCE(SUM(cct.Rewards), 0) "
+        "(SELECT COALESCE(SUM(cct.REWARDS), 0) "
         "FROM CreditCardTransactions cct "
-        "WHERE cct.TransactionId = t.ID) AS rewards, "
+        "WHERE cct.TRANSACTION_ID = t.ID) AS rewards, "
         "c.CATEGORY_NAME AS category_name, "
         "s.SUB_CATEGORY_NAME AS sub_category_name, "
         "fa.ACCOUNT_NAME AS from_account_name, "
@@ -1432,7 +1432,7 @@ WHERE a.IS_ACTIVE = 1
           COALESCE(SUM(CASE
             WHEN t.DATE >= UNIX_TIMESTAMP(bc.cycle_start) * 1000
               AND t.DATE < UNIX_TIMESTAMP(bc.cycle_end) * 1000
-            THEN cct.Rewards
+            THEN cct.REWARDS
             ELSE 0
           END), 0) as cap_current_amount,
           COALESCE(SUM(CASE
@@ -1443,14 +1443,14 @@ WHERE a.IS_ACTIVE = 1
           END), 0) as cap_current_spend,
                 cs.card_current_spend as card_current_spend,
                 cccd.REWARD_PER_AMOUNT as reward_per_amount,
-                COALESCE(SUM(cct.Rewards), 0) as total_rewards
+                COALESCE(SUM(cct.REWARDS), 0) as total_rewards
             FROM CreditCardCapDetails cccd
         INNER JOIN billing_cycles bc
           ON bc.CREDIT_CARD_ID = cccd.CREDIT_CARD_ID
         INNER JOIN card_spending cs
           ON cs.CREDIT_CARD_ID = cccd.CREDIT_CARD_ID
-            LEFT JOIN CreditCardTransactions cct ON cct.CapId = cccd.ID
-        LEFT JOIN Transactions t ON t.ID = cct.TransactionId
+            LEFT JOIN CreditCardTransactions cct ON cct.CAP_ID = cccd.ID
+        LEFT JOIN Transactions t ON t.ID = cct.TRANSACTION_ID
             WHERE 1=1
         ''';
 

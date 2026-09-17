@@ -232,7 +232,7 @@ WHERE ID = :id
 
         if (parsedAccount.type == 'Credit Card') {
           await service.executeWriteQuery(
-            'DELETE FROM CreditCardTransactions WHERE TransactionId = :id',
+            'DELETE FROM CreditCardTransactions WHERE TRANSACTION_ID = :id',
             {'id': transactionId},
           );
 
@@ -611,15 +611,15 @@ INSERT INTO SplitwiseTransactions (
     final capPercentage = _toDouble(rowMap['CAP_PERCENTAGE']);
     final rewardPerAmount = _toDouble(rowMap['REWARD_PER_AMOUNT']);
     final rewardUnit = rewardPerAmount <= 0 ? 100 : rewardPerAmount;
-    final rewards = (amount / rewardUnit).floor() * capPercentage;
+    final rewards = (amount * capPercentage / rewardUnit).floor();
 
     await service.executeWriteQuery(
       '''
 INSERT INTO CreditCardTransactions (
-    TransactionId,
-    CreditCardId,
-    CapId,
-    Rewards
+    TRANSACTION_ID,
+    CREDIT_CARD_ID,
+    CAP_ID,
+    REWARDS
 ) VALUES (
     :transactionId,
     :creditCardId,
