@@ -12,6 +12,7 @@ import 'local_server_screen.dart';
 import 'pay_cc_bill_screen.dart';
 import 'splitwise_screen.dart';
 import 'unaudited_expense_screen.dart';
+import 'mcc_code_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -121,6 +122,16 @@ class ProfileScreen extends StatelessWidget {
               icon: Icons.payment_rounded,
               title: 'Pay CC Bill',
               onTap: () => PayCcBillSheet.show(context),
+            ),
+            _buildOptionTile(
+              icon: Icons.discount_outlined,
+              title: 'MCC Codes',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const MCCCodeScreen()),
+                );
+              },
             ),
             const SizedBox(height: 20),
             _buildSectionHeader('Statements'),

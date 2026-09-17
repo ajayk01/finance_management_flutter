@@ -348,6 +348,78 @@ VALUES (
     await service.executeWriteQuery(sql, params);
   }
 
+  static Future<void> createMCCCode({
+    required int mccCode,
+    required String name,
+  }) async {
+    if (mccCode <= 0) {
+      throw ArgumentError('Invalid mccCode: $mccCode');
+    }
+
+    final trimmedName = name.trim();
+    if (trimmedName.isEmpty) {
+      throw ArgumentError('name cannot be empty');
+    }
+
+    final sql = '''
+INSERT INTO MCCCodeDetails (
+    MCC_CODE,
+    NAME
+)
+VALUES (
+    :mccCode,
+    :name
+)
+''';
+
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+
+    final params = <String, dynamic>{
+      'mccCode': mccCode,
+      'name': trimmedName,
+    };
+
+    await service.executeWriteQuery(sql, params);
+  }
+
+  static Future<List<Map<String, dynamic>>> getAllMCCCodes() async {
+    const sql = '''
+SELECT 
+    ID as id,
+    MCC_CODE as mcc_code,
+    NAME as name
+FROM MCCCodeDetails
+ORDER BY MCC_CODE ASC
+''';
+
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+
+    final results = await service.executeReadQuery(sql);
+    final rows = (results['rows'] as List? ?? []);
+
+    return rows
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  static Future<void> deleteMCCCode(int id) async {
+    if (id <= 0) {
+      throw ArgumentError('Invalid id: $id');
+    }
+
+    final sql = 'DELETE FROM MCCCodeDetails WHERE ID = :id';
+
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+
+    await service.executeWriteQuery(sql, {'id': id});
+  }
+
   static Future<void> addTransferTransaction({
     required double amount,
     required String fromAccountId,
