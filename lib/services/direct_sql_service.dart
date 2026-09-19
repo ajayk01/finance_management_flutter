@@ -384,6 +384,44 @@ VALUES (
     await service.executeWriteQuery(sql, params);
   }
 
+  static Future<void> updateMCCCode({
+    required int id,
+    required int mccCode,
+    required String name,
+  }) async {
+    if (id <= 0) {
+      throw ArgumentError('Invalid id: $id');
+    }
+    if (mccCode <= 0) {
+      throw ArgumentError('Invalid mccCode: $mccCode');
+    }
+
+    final trimmedName = name.trim();
+    if (trimmedName.isEmpty) {
+      throw ArgumentError('name cannot be empty');
+    }
+
+    final sql = '''
+UPDATE MCCCodeDetails
+SET
+    MCC_CODE = :mccCode,
+    NAME = :name
+WHERE ID = :id
+''';
+
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+
+    final params = <String, dynamic>{
+      'id': id,
+      'mccCode': mccCode,
+      'name': trimmedName,
+    };
+
+    await service.executeWriteQuery(sql, params);
+  }
+
   static Future<List<Map<String, dynamic>>> getAllMCCCodes() async {
     const sql = '''
 SELECT 

@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../services/api_service.dart';
-import '../services/app_data_cache.dart';
-import '../services/direct_sql_service.dart';
-import '../models/models.dart';
+import '../services/splitwise_route_service.dart';
+import '../services/splitwise_session_service.dart';
 import '../utils/currency_formatter.dart';
 
 class SplitwiseScreen extends StatefulWidget {
@@ -14,9 +12,8 @@ class SplitwiseScreen extends StatefulWidget {
 }
 
 class _SplitwiseScreenState extends State<SplitwiseScreen> {
-  final _api = ApiService();
+  final _splitwise = SplitwiseRouteService();
   bool _loading = true;
-  bool _syncing = false;
   List<Map<String, dynamic>> _friends = [];
   String? _error;
 
@@ -32,11 +29,10 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
       _error = null;
     });
     try {
-      final data = await _api.getFriendsBalance();
-      final friends = (data['friends'] as List?)
-              ?.map((e) => e as Map<String, dynamic>)
-              .toList() ??
-          [];
+      await SplitwiseSessionService.instance.ensureAuthenticated(context);
+      final friends = await _splitwise.getFriends(
+        reauthenticate: _reauthenticateSplitwise,
+      );
       setState(() {
         _friends = friends;
         _loading = false;
@@ -49,25 +45,9 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
     }
   }
 
-  Future<void> _syncSplitwise() async {
-    setState(() => _syncing = true);
-    try {
-      await _api.syncSplitwise();
-      await _loadFriends();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Splitwise synced successfully')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sync failed: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _syncing = false);
-    }
+  Future<void> _reauthenticateSplitwise() {
+    return SplitwiseSessionService.instance
+        .ensureAuthenticated(context, force: true);
   }
 
   @override
@@ -84,17 +64,6 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
         foregroundColor: const Color(0xFF1E293B),
         elevation: 0,
         actions: [
-          IconButton(
-            onPressed: _syncing ? null : _syncSplitwise,
-            icon: _syncing
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.sync_rounded, size: 22),
-            tooltip: 'Sync Splitwise',
-          ),
           IconButton(
             onPressed: _loading ? null : _loadFriends,
             icon: const Icon(Icons.refresh_rounded, size: 22),
@@ -125,24 +94,18 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
     );
   }
 
-  List<Map<String, dynamic>> get _activeFriends => _friends.where((f) {
-    final db = _toDouble(f['notionAmount']);
-    final sw = _toDouble(f['splitwiseAmount']);
-    return db > 0 || sw > 0;
-  }).toList();
-
   Widget _buildContent() {
-    final active = _activeFriends;
-    if (active.isEmpty) {
+    if (_friends.isEmpty) {
       return const Center(
-        child: Text('No friends with outstanding balance', style: TextStyle(color: Color(0xFF6B7280))),
+        child: Text('No Splitwise friends found',
+            style: TextStyle(color: Color(0xFF6B7280))),
       );
     }
 
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
-      child: _buildSummaryTable(active),
+      child: _buildSummaryTable(_friends),
     );
   }
 
@@ -183,13 +146,8 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
               final friendId = (f['friendId'] ?? '').toString();
               final dbAmt = _toDouble(f['notionAmount']);
               final swAmt = _toDouble(f['splitwiseAmount']);
-              final hasMismatch = (dbAmt - swAmt).abs() > 1;
               final isEven = i.isEven;
-              final rowColor = hasMismatch
-                  ? const Color(0xFFFEF2F2)
-                  : isEven
-                      ? Colors.white
-                      : const Color(0xFFF9FAFB);
+              final rowColor = isEven ? Colors.white : const Color(0xFFF9FAFB);
               return TableRow(
                 decoration: BoxDecoration(color: rowColor),
                 children: [
@@ -197,16 +155,19 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
                     child: _buildDataCell(name),
                     friendId: friendId,
                     friendName: name,
+                    balance: swAmt,
                   ),
                   _buildTappableCell(
                     child: _buildAmountCell(dbAmt, negativeIsRed: true),
                     friendId: friendId,
                     friendName: name,
+                    balance: swAmt,
                   ),
                   _buildTappableCell(
                     child: _buildAmountCell(swAmt, negativeIsRed: true),
                     friendId: friendId,
                     friendName: name,
+                    balance: swAmt,
                   ),
                 ],
               );
@@ -271,6 +232,7 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
     required Widget child,
     required String friendId,
     required String friendName,
+    required double balance,
   }) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -281,6 +243,7 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
             builder: (_) => _FriendTransactionsPage(
               friendId: friendId,
               friendName: friendName,
+              balance: balance,
               onSettled: _loadFriends,
             ),
           ),
@@ -303,23 +266,25 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
 class _FriendTransactionsPage extends StatefulWidget {
   final String friendId;
   final String friendName;
+  final double balance;
   final VoidCallback onSettled;
 
   const _FriendTransactionsPage({
     required this.friendId,
     required this.friendName,
+    required this.balance,
     required this.onSettled,
   });
 
   @override
-  State<_FriendTransactionsPage> createState() => _FriendTransactionsPageState();
+  State<_FriendTransactionsPage> createState() =>
+      _FriendTransactionsPageState();
 }
 
 class _FriendTransactionsPageState extends State<_FriendTransactionsPage> {
-  final _api = ApiService();
+  final _splitwise = SplitwiseRouteService();
   bool _loading = true;
   List<Map<String, dynamic>> _transactions = [];
-  Set<int> _selectedIndices = {};
   String? _error;
 
   @override
@@ -334,17 +299,13 @@ class _FriendTransactionsPageState extends State<_FriendTransactionsPage> {
       _error = null;
     });
     try {
-      final data = await _api.getFriendTransactions(
+      await SplitwiseSessionService.instance.ensureAuthenticated(context);
+      final txns = await _splitwise.getFriendExpenses(
         friendId: widget.friendId,
-        friendName: widget.friendName,
+        reauthenticate: _reauthenticateSplitwise,
       );
-      final txns = (data['transactions'] as List?)
-              ?.map((e) => e as Map<String, dynamic>)
-              .toList() ??
-          [];
       setState(() {
         _transactions = txns;
-        _selectedIndices = Set<int>.from(List.generate(txns.length, (i) => i));
         _loading = false;
       });
     } catch (e) {
@@ -353,6 +314,11 @@ class _FriendTransactionsPageState extends State<_FriendTransactionsPage> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _reauthenticateSplitwise() {
+    return SplitwiseSessionService.instance
+        .ensureAuthenticated(context, force: true);
   }
 
   @override
@@ -368,31 +334,6 @@ class _FriendTransactionsPageState extends State<_FriendTransactionsPage> {
         backgroundColor: Colors.white,
         foregroundColor: const Color(0xFF1E293B),
         elevation: 0,
-        actions: [
-          if (_transactions.isNotEmpty)
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  if (_selectedIndices.length == _transactions.length) {
-                    _selectedIndices.clear();
-                  } else {
-                    _selectedIndices = Set<int>.from(
-                        List.generate(_transactions.length, (i) => i));
-                  }
-                });
-              },
-              child: Text(
-                _selectedIndices.length == _transactions.length
-                    ? 'Deselect All'
-                    : 'Select All',
-                style: const TextStyle(
-                  color: Color(0xFF3B3BF9),
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -420,7 +361,8 @@ class _FriendTransactionsPageState extends State<_FriendTransactionsPage> {
   Widget _buildBody() {
     if (_transactions.isEmpty) {
       return const Center(
-        child: Text('No transactions', style: TextStyle(color: Color(0xFF6B7280))),
+        child:
+            Text('No transactions', style: TextStyle(color: Color(0xFF6B7280))),
       );
     }
 
@@ -446,27 +388,21 @@ class _FriendTransactionsPageState extends State<_FriendTransactionsPage> {
                 borderRadius: BorderRadius.circular(12),
                 child: Table(
                   columnWidths: const {
-                    0: FixedColumnWidth(40),
-                    1: FlexColumnWidth(3),
-                    2: FlexColumnWidth(2),
-                    3: FlexColumnWidth(2),
+                    0: FlexColumnWidth(3),
+                    1: FlexColumnWidth(2),
                   },
                   children: [
                     const TableRow(
                       decoration: BoxDecoration(color: Color(0xFF1E293B)),
                       children: [
-                        _TxnHeaderCell(''),
                         _TxnHeaderCell('Description'),
-                        _TxnHeaderCell('DB Amt'),
                         _TxnHeaderCell('Splitwise Amt'),
                       ],
                     ),
                     ..._transactions.asMap().entries.map((entry) {
                       final i = entry.key;
                       final txn = entry.value;
-                      final dbAmt = _toDouble(txn['amount']);
                       final swAmt = _toDouble(txn['totalAmount']);
-                      final hasMismatch = (dbAmt - swAmt).abs() > 1;
                       final isEven = i.isEven;
                       final desc = (txn['description'] ?? '').toString();
                       final date = (txn['date'] ?? '').toString();
@@ -480,57 +416,34 @@ class _FriendTransactionsPageState extends State<_FriendTransactionsPage> {
 
                       return TableRow(
                         decoration: BoxDecoration(
-                          color: hasMismatch
-                              ? const Color(0xFFFEF2F2)
-                              : isEven
-                                  ? Colors.white
-                                  : const Color(0xFFF9FAFB),
+                          color:
+                              isEven ? Colors.white : const Color(0xFFF9FAFB),
                         ),
                         children: [
-                          GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () {
-                              setState(() {
-                                if (_selectedIndices.contains(i)) {
-                                  _selectedIndices.remove(i);
-                                } else {
-                                  _selectedIndices.add(i);
-                                }
-                              });
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                              child: Icon(
-                                _selectedIndices.contains(i)
-                                    ? Icons.check_box_rounded
-                                    : Icons.check_box_outline_blank_rounded,
-                                size: 20,
-                                color: _selectedIndices.contains(i)
-                                    ? const Color(0xFF3B3BF9)
-                                    : const Color(0xFF9CA3AF),
-                              ),
-                            ),
-                          ),
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 10),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
                                   desc,
-                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF1E293B)),
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: Color(0xFF1E293B)),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
                                   formattedDate,
-                                  style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF)),
+                                  style: const TextStyle(
+                                      fontSize: 10, color: Color(0xFF9CA3AF)),
                                 ),
                               ],
                             ),
                           ),
-                          _buildTxnAmountCell(dbAmt),
                           _buildTxnAmountCell(swAmt),
                         ],
                       );
@@ -547,11 +460,12 @@ class _FriendTransactionsPageState extends State<_FriendTransactionsPage> {
             child: SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: _selectedIndices.isEmpty
+                onPressed: widget.balance == 0
                     ? null
                     : () => _showSettleUpDialog(context),
                 icon: const Icon(Icons.handshake_outlined, size: 18),
-                label: Text('Settle Up  ${formatINR(_selectedTotal, decimals: 0)}'),
+                label: Text(
+                    'Settle Up  ${formatINR(widget.balance.abs(), decimals: 0)}'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF3B3BF9),
                   foregroundColor: Colors.white,
@@ -582,29 +496,14 @@ class _FriendTransactionsPageState extends State<_FriendTransactionsPage> {
     );
   }
 
-  double get _selectedTotal => _selectedIndices
-      .where((i) => i < _transactions.length)
-      .fold<double>(0, (sum, i) => sum + _toDouble(_transactions[i]['amount']));
-
   void _showSettleUpDialog(BuildContext context) {
-    final selectedTxns = _selectedIndices
-        .where((i) => i < _transactions.length)
-        .map((i) => _transactions[i])
-        .toList();
-    final totalAmount = selectedTxns.fold<double>(
-        0, (sum, t) => sum + _toDouble(t['amount']));
-    final selectedIds = selectedTxns
-        .map((t) => (t['id'] ?? '').toString())
-        .where((id) => id.isNotEmpty)
-        .toList();
-
     showDialog(
       context: context,
       builder: (ctx) => _SettleUpDialog(
         friendId: widget.friendId,
         friendName: widget.friendName,
-        initialAmount: totalAmount,
-        settledTransactionIds: selectedIds,
+        initialAmount: widget.balance.abs(),
+        currentUserPays: widget.balance < 0,
         onSettled: () {
           _loadTransactions();
           widget.onSettled();
@@ -649,14 +548,14 @@ class _SettleUpDialog extends StatefulWidget {
   final String friendId;
   final String friendName;
   final double? initialAmount;
-  final List<String>? settledTransactionIds;
+  final bool currentUserPays;
   final VoidCallback onSettled;
 
   const _SettleUpDialog({
     required this.friendId,
     required this.friendName,
     this.initialAmount,
-    this.settledTransactionIds,
+    required this.currentUserPays,
     required this.onSettled,
   });
 
@@ -665,37 +564,16 @@ class _SettleUpDialog extends StatefulWidget {
 }
 
 class _SettleUpDialogState extends State<_SettleUpDialog> {
-  final _api = ApiService();
-  final _cache = AppDataCache();
+  final _splitwise = SplitwiseRouteService();
   final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController();
-  bool _loadingAccounts = true;
   bool _submitting = false;
-  List<BankAccount> _bankAccounts = [];
-  String? _selectedAccountId;
 
   @override
   void initState() {
     super.initState();
     if (widget.initialAmount != null && widget.initialAmount! > 0) {
       _amountController.text = widget.initialAmount!.toStringAsFixed(0);
-    }
-    _loadAccounts();
-  }
-
-  Future<void> _loadAccounts() async {
-    try {
-      await _cache.ensureAccounts();
-      final banks = _cache.activeBankAccounts;
-      setState(() {
-        _bankAccounts = banks;
-        if (banks.isNotEmpty) {
-          _selectedAccountId = banks.first.id;
-        }
-        _loadingAccounts = false;
-      });
-    } catch (_) {
-      setState(() => _loadingAccounts = false);
     }
   }
 
@@ -719,15 +597,11 @@ class _SettleUpDialogState extends State<_SettleUpDialog> {
     setState(() => _submitting = true);
     try {
       final amount = double.parse(_amountController.text.trim());
-      await _api.settleUp(
+      await _splitwise.createPayment(
         friendId: widget.friendId,
-        bankAccountId: _selectedAccountId!,
-        totalSettlementAmount: amount,
-        settledTransactionIds: widget.settledTransactionIds,
-      );
-      await DirectSqlService.markSplitwiseTransactionsSettled(
-        friendId: widget.friendId,
-        transactionIds: widget.settledTransactionIds ?? const [],
+        amount: amount,
+        currentUserPays: widget.currentUserPays,
+        reauthenticate: _reauthenticateSplitwise,
       );
       widget.onSettled();
       if (mounted) Navigator.of(context).pop();
@@ -746,55 +620,43 @@ class _SettleUpDialogState extends State<_SettleUpDialog> {
     }
   }
 
+  Future<void> _reauthenticateSplitwise() {
+    return SplitwiseSessionService.instance
+        .ensureAuthenticated(context, force: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text('Settle Up with ${widget.friendName}'),
-      content: _loadingAccounts
-          ? const SizedBox(
-              height: 80,
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-            )
-          : Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<String>(
-                    value: _selectedAccountId,
-                    decoration: const InputDecoration(
-                      labelText: 'Bank Account',
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (v) => v == null ? 'Select a bank account' : null,
-                    items: _bankAccounts
-                        .map((a) => DropdownMenuItem(
-                              value: a.id,
-                              child: Text(a.name),
-                            ))
-                        .toList(),
-                    onChanged: (v) => setState(() => _selectedAccountId = v),
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _amountController,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'Amount',
-                      prefixText: '₹ ',
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) return 'Enter amount';
-                      final parsed = double.tryParse(v.trim());
-                      if (parsed == null || parsed <= 0) return 'Enter a valid amount';
-                      return null;
-                    },
-                  ),
-                ],
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _amountController,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Amount',
+                prefixText: '₹ ',
+                border: OutlineInputBorder(),
               ),
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) {
+                  return 'Enter amount';
+                }
+                final parsed = double.tryParse(v.trim());
+                if (parsed == null || parsed <= 0) {
+                  return 'Enter a valid amount';
+                }
+                return null;
+              },
             ),
+          ],
+        ),
+      ),
       actions: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.of(context).pop(),
