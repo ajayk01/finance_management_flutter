@@ -14,6 +14,7 @@ class SplitwiseScreen extends StatefulWidget {
 class _SplitwiseScreenState extends State<SplitwiseScreen> {
   final _splitwise = SplitwiseRouteService();
   bool _loading = true;
+  bool _syncing = false;
   List<Map<String, dynamic>> _friends = [];
   String? _error;
 
@@ -50,6 +51,42 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
         .ensureAuthenticated(context, force: true);
   }
 
+  Future<void> _syncSplitwise() async {
+    if (_syncing) {
+      return;
+    }
+
+    setState(() => _syncing = true);
+    try {
+      await SplitwiseSessionService.instance.ensureAuthenticated(context);
+      final importedCount = await _splitwise.syncNotifications(
+        reauthenticate: _reauthenticateSplitwise,
+      );
+      await _loadFriends();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              importedCount == 0
+                  ? 'Splitwise is already up to date'
+                  : 'Imported $importedCount Splitwise expense${importedCount == 1 ? '' : 's'}',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Splitwise sync failed: $error')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _syncing = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -65,7 +102,18 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
         elevation: 0,
         actions: [
           IconButton(
-            onPressed: _loading ? null : _loadFriends,
+            onPressed: _loading || _syncing ? null : _syncSplitwise,
+            icon: _syncing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.sync_rounded, size: 22),
+            tooltip: 'Sync Splitwise',
+          ),
+          IconButton(
+            onPressed: _loading || _syncing ? null : _loadFriends,
             icon: const Icon(Icons.refresh_rounded, size: 22),
             tooltip: 'Refresh',
           ),

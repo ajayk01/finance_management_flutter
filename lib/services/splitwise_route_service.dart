@@ -120,9 +120,8 @@ class SplitwiseRouteService {
         final splitwiseFriendId = data['SPLITWISE_FRIEND_ID']?.toString() ?? '';
         final apiFriend = apiFriendsById[splitwiseFriendId];
         final dbAmount = _toDouble(data['TOTAL_OWNS']);
-        final splitwiseAmount = apiFriend == null
-            ? 0.0
-            : _parseFriendBalance(apiFriend);
+        final splitwiseAmount =
+            apiFriend == null ? 0.0 : _parseFriendBalance(apiFriend);
         if (dbAmount <= 0 || splitwiseAmount <= 0) {
           continue;
         }
@@ -198,6 +197,160 @@ class SplitwiseRouteService {
       },
       reauthenticate ?? _missingReauthentication,
     );
+  }
+
+  Future<int> syncNotifications({
+    Future<void> Function()? reauthenticate,
+  }) async {
+    final renewSession = reauthenticate ?? _missingReauthentication;
+    final config = MySqlConfig.fromDotEnv();
+    await _mySqlService.connect(config);
+
+    try {
+      final syncTimeResult = await _mySqlService.executeReadQuery(
+        'SELECT TIME FROM SplitwiseSyncTime LIMIT 1',
+      );
+      final syncRows = syncTimeResult['rows'] as List? ?? const [];
+      final lastSyncTime = syncRows.isEmpty
+          ? null
+          : _toInt(Map<String, dynamic>.from(syncRows.first as Map)['TIME']);
+
+      final notifications = await _getNewNotifications(
+        lastSyncTime: lastSyncTime,
+        reauthenticate: renewSession,
+      );
+      var importedCount = 0;
+
+      for (final notification in notifications) {
+        final source = notification['source'];
+        final content = notification['content']?.toString().toLowerCase() ?? '';
+        if (source is! Map ||
+            source['type']?.toString() != 'Expense' ||
+            source['id'] == null ||
+            !content.contains('added')) {
+          continue;
+        }
+
+        final expenseId = source['id'].toString();
+        final expenseResponse = await _fetchSplitwise(
+          'get_expense/$expenseId',
+          renewSession,
+        );
+        final expense = expenseResponse['expense'];
+        if (expense is! Map) {
+          continue;
+        }
+
+        final repayment = (expense['repayments'] as List? ?? const [])
+            .whereType<Map>()
+            .cast<Map>()
+            .firstWhere(
+              (item) => item['from']?.toString() == _currentUserId,
+              orElse: () => const <String, dynamic>{},
+            );
+        final splitwiseFriendId = repayment['to']?.toString();
+        final amount = _toDouble(repayment['amount']);
+        if (splitwiseFriendId == null ||
+            splitwiseFriendId.isEmpty ||
+            amount <= 0) {
+          continue;
+        }
+
+        final existing = await _mySqlService.executeReadQuery(
+          'SELECT SPLITWISE_TRANSACTION_ID FROM SplitwiseTransactions '
+          'WHERE SPLITWISE_TRANSACTION_ID = :expenseId LIMIT 1',
+          {'expenseId': expenseId},
+        );
+        if ((existing['rows'] as List? ?? const []).isNotEmpty) {
+          continue;
+        }
+
+        final friendResult = await _mySqlService.executeReadQuery(
+          'SELECT ID FROM SplitwiseFriends '
+          'WHERE SPLITWISE_FRIEND_ID = :friendId LIMIT 1',
+          {'friendId': splitwiseFriendId},
+        );
+        final friendRows = friendResult['rows'] as List? ?? const [];
+        if (friendRows.isEmpty) {
+          continue;
+        }
+
+        final localFriendId = _toInt(
+          Map<String, dynamic>.from(friendRows.first as Map)['ID'],
+        );
+        if (localFriendId == null) {
+          continue;
+        }
+
+        await _mySqlService.executeWriteQuery(
+          'INSERT INTO SplitwiseTransactions '
+          '(SPLITWISE_TRANSACTION_ID, FRIEND_ID, SPLITED_AMOUNT, IS_SETTLED) '
+          'VALUES (:expenseId, :friendId, :amount, 0)',
+          {
+            'expenseId': expenseId,
+            'friendId': localFriendId,
+            'amount': amount,
+          },
+        );
+        importedCount++;
+      }
+
+      await _mySqlService.executeWriteQuery('DELETE FROM SplitwiseSyncTime');
+      await _mySqlService.executeWriteQuery(
+        'INSERT INTO SplitwiseSyncTime (TIME) VALUES (:time)',
+        {'time': DateTime.now().millisecondsSinceEpoch},
+      );
+      return importedCount;
+    } finally {
+      await _mySqlService.disconnect();
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _getNewNotifications({
+    required int? lastSyncTime,
+    required Future<void> Function() reauthenticate,
+  }) async {
+    var limit = 50;
+    var matchingNotifications = <Map<String, dynamic>>[];
+
+    while (matchingNotifications.isEmpty && limit <= 200) {
+      final response = await _fetchSplitwise(
+        'get_notifications?limit=$limit',
+        reauthenticate,
+      );
+      final notifications = (response['notifications'] as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+      if (notifications.isEmpty) {
+        break;
+      }
+
+      matchingNotifications = notifications.where((notification) {
+        final content = notification['content']?.toString().toLowerCase() ?? '';
+        final createdBy = notification['created_by']?.toString();
+        final createdAt =
+            DateTime.tryParse(notification['created_at']?.toString() ?? '');
+        final isAfterLastSync = lastSyncTime == null ||
+            (createdAt != null &&
+                createdAt.millisecondsSinceEpoch > lastSyncTime);
+        return !content.contains('settle all balance') &&
+            createdBy != _currentUserId &&
+            isAfterLastSync;
+      }).toList();
+
+      final oldest = DateTime.tryParse(
+        notifications.last['created_at']?.toString() ?? '',
+      );
+      if (lastSyncTime != null &&
+          oldest != null &&
+          oldest.millisecondsSinceEpoch <= lastSyncTime) {
+        break;
+      }
+      limit += 50;
+    }
+
+    return matchingNotifications;
   }
 
   Future<List<SplitwiseGroup>> getGroupsWithMembers({
@@ -286,6 +439,12 @@ class SplitwiseRouteService {
   static double _toDouble(dynamic value) {
     if (value is num) return value.toDouble();
     return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static int? _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
   }
 
   static double _parseFriendBalance(Map<String, dynamic> friend) {

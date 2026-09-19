@@ -71,7 +71,8 @@ class MySqlService {
       return value ? '1' : '0';
     }
     if (value is List<int>) {
-      final hex = value.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+      final hex =
+          value.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
       return '0x$hex';
     }
 
@@ -152,16 +153,17 @@ class MySqlService {
     await conn.execute(query, params);
   }
 
-  Future<Map<String, dynamic>>executeReadQuery(String query) async 
-  {
+  Future<Map<String, dynamic>> executeReadQuery(
+    String query, [
+    Map<String, dynamic>? params,
+  ]) async {
     final conn = _conn;
-    if(conn == null) 
-    {
+    if (conn == null) {
       throw StateError(
           'MySQL connection is not initialized. Call connect() first.');
     }
 
-    final result = await conn.execute(query);
+    final result = await conn.execute(query, params);
 
     final rows = result.rows.map((row) {
       final map = <String, dynamic>{};
@@ -171,9 +173,7 @@ class MySqlService {
       return map;
     }).toList();
 
-    return {
-      'rows': rows
-    };
+    return {'rows': rows};
   }
 
   Future<void> executeWriteQuery(
@@ -215,11 +215,12 @@ class MySqlService {
         if (createResult.rows.isNotEmpty) {
           final createMeta = _rowToMap(createResult, createResult.rows.first);
 
-          final createSql = asString(createMeta['SQL Original Statement']).isNotEmpty
-              ? asString(createMeta['SQL Original Statement'])
-              : asString(createMeta['Statement']).isNotEmpty
-                  ? asString(createMeta['Statement'])
-                  : asString(createMeta['Create Trigger']);
+          final createSql =
+              asString(createMeta['SQL Original Statement']).isNotEmpty
+                  ? asString(createMeta['SQL Original Statement'])
+                  : asString(createMeta['Statement']).isNotEmpty
+                      ? asString(createMeta['Statement'])
+                      : asString(createMeta['Create Trigger']);
 
           if (createSql.isNotEmpty) {
             sql = createSql;
@@ -265,8 +266,10 @@ class MySqlService {
     final definitions = <String>[];
 
     for (final row in result.rows) {
-      final routineName = row.typedColByName<String>('ROUTINE_NAME')?.trim() ?? '';
-      final routineType = row.typedColByName<String>('ROUTINE_TYPE')?.trim() ?? '';
+      final routineName =
+          row.typedColByName<String>('ROUTINE_NAME')?.trim() ?? '';
+      final routineType =
+          row.typedColByName<String>('ROUTINE_TYPE')?.trim() ?? '';
       if (routineName.isEmpty || routineType.isEmpty) {
         continue;
       }
@@ -281,9 +284,8 @@ class MySqlService {
       }
 
       final createRow = createResult.rows.first;
-      final createColumnName = safeType == 'PROCEDURE'
-          ? 'Create Procedure'
-          : 'Create Function';
+      final createColumnName =
+          safeType == 'PROCEDURE' ? 'Create Procedure' : 'Create Function';
       final sql = createRow.typedColByName<String>(createColumnName) ?? '';
       if (sql.isNotEmpty) {
         definitions.add('$sql;');
@@ -351,7 +353,8 @@ class MySqlService {
       final tableNameColumn = tablesResult.cols.first.name;
       final encoder = const JsonEncoder.withIndent('  ');
       final buffer = StringBuffer()
-        ..writeln('Database: ${config?.databaseName ?? MySqlConfig.fromDotEnv().databaseName}')
+        ..writeln(
+            'Database: ${config?.databaseName ?? MySqlConfig.fromDotEnv().databaseName}')
         ..writeln('Generated at: ${DateTime.now().toIso8601String()}')
         ..writeln();
 
@@ -410,8 +413,7 @@ class MySqlService {
           .toIso8601String()
           .replaceAll(':', '-')
           .replaceAll('.', '-');
-      final filePath =
-          '${directory.path}/$fileNamePrefix-$timestamp.txt';
+      final filePath = '${directory.path}/$fileNamePrefix-$timestamp.txt';
       final file = File(filePath);
       await file.writeAsString(buffer.toString());
       return file.path;
@@ -464,7 +466,8 @@ class MySqlService {
           .replaceAll('.', '-');
       final filePath = '${directory.path}/$fileNamePrefix-$timestamp.sql';
 
-      final tablesResult = await conn.execute('SHOW FULL TABLES WHERE Table_type = \'BASE TABLE\'');
+      final tablesResult = await conn
+          .execute('SHOW FULL TABLES WHERE Table_type = \'BASE TABLE\'');
       if (tablesResult.cols.isEmpty) {
         throw StateError('Could not read table names from the database.');
       }
