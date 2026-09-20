@@ -87,6 +87,13 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
     await for (final request in server) {
       final path = request.uri.path;
 
+      if (request.method == 'OPTIONS') {
+        _writeCorsHeaders(request.response);
+        request.response.statusCode = HttpStatus.noContent;
+        unawaited(request.response.close());
+        continue;
+      }
+
       if (path == '/health') {
         _writeJson(request.response, {
           'ok': true,
@@ -108,7 +115,47 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
         continue;
       }
 
-      await _serveActiveAccounts(request.response);
+      if (path == '/api/bank-details') {
+        await _serveBankDetails(request.response);
+        continue;
+      }
+
+      if (path == '/' || path == '/api/accounts') {
+        await _serveActiveAccounts(request.response);
+        continue;
+      }
+
+      _writeJson(
+        request.response,
+        {
+          'ok': false,
+          'error': 'Endpoint not found',
+        },
+        statusCode: HttpStatus.notFound,
+      );
+    }
+  }
+
+  Future<void> _serveBankDetails(HttpResponse response) async {
+    try {
+      final accounts = await DirectSqlService.getAllActiveAccounts();
+      
+      _writeJson(response, {
+        'bankAccounts': accounts.bankAccounts.map(_bankDetailsToJson).toList(),
+        'creditCardAccounts':
+            accounts.creditCardAccounts.map(_creditCardAccountToJson).toList(),
+        'investmentAccounts':
+            accounts.investmentAccounts.map(_investmentAccountToJson).toList(),
+      });
+    } catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.toString(),
+        },
+        statusCode: HttpStatus.internalServerError,
+      );
     }
   }
 
@@ -147,6 +194,16 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
     };
   }
 
+  Map<String, dynamic> _bankDetailsToJson(dynamic account) {
+    return {
+      'id': account.id,
+      'name': account.name,
+      'balance': account.balance,
+      'initialBalance': account.initialBalance,
+      'logo': account.logo,
+    };
+  }
+
   Map<String, dynamic> _creditCardAccountToJson(dynamic account) {
     return {
       'id': account.id,
@@ -179,8 +236,15 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
   }) {
     response.statusCode = statusCode;
     response.headers.contentType = ContentType.json;
+    _writeCorsHeaders(response);
     response.write(jsonEncode(data));
     unawaited(response.close());
+  }
+
+  void _writeCorsHeaders(HttpResponse response) {
+    response.headers.set(HttpHeaders.accessControlAllowOriginHeader, '*');
+    response.headers.set(HttpHeaders.accessControlAllowMethodsHeader, 'GET, OPTIONS');
+    response.headers.set(HttpHeaders.accessControlAllowHeadersHeader, 'Content-Type');
   }
 
   Future<String?> _getDeviceIp() async {
@@ -278,7 +342,7 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
             ],
             const SizedBox(height: 12),
             const Text(
-              'Endpoints:\nGET /health\nGET / (returns getAllActiveAccounts JSON)',
+              'Endpoints:\nGET /health\nGET /api/bank-details\nGET /api/accounts\nGET / (returns all active accounts)',
               style: TextStyle(fontSize: 14, color: Colors.black87),
             ),
             const SizedBox(height: 8),
