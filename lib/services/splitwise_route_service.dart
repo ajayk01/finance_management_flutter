@@ -122,7 +122,8 @@ class SplitwiseRouteService {
         final dbAmount = _toDouble(data['TOTAL_OWNS']);
         final splitwiseAmount =
             apiFriend == null ? 0.0 : _parseFriendBalance(apiFriend);
-        if (dbAmount <= 0 || splitwiseAmount <= 0) {
+        if (dbAmount.abs() < 0.01 || splitwiseAmount.abs() < 0.01) 
+        {
           continue;
         }
 
@@ -334,23 +335,32 @@ class SplitwiseRouteService {
 
       await _mySqlService.executeWriteQuery('START TRANSACTION');
       try {
-        final dummyTransactionIds = splitRows
+        final localSplitRows = splitRows.whereType<Map>().where(
+              (row) => _toInt(row['TRANSACTION_ID']) != null,
+            );
+        final localSettlementAmount = localSplitRows.fold<double>(
+          0,
+          (total, row) => total + _toDouble(row['SPLITED_AMOUNT']),
+        );
+        final dummyTransactionIds = localSplitRows
             .whereType<Map>()
             .map((row) => _toInt(row['SPLITED_TRANSACTION_ID']))
             .whereType<int>()
             .join(', ');
-        await _mySqlService.executeWriteQuery(
-          'INSERT INTO Transactions '
-          '(AMOUNT, DATE, NOTES, FROM_ACCOUNT_ID, CATEGORY_ID, SUB_CATEGORY_ID, TRANSCATION_TYPE) '
-          'VALUES (:amount, :date, :notes, :accountId, NULL, NULL, :transactionType)',
-          {
-            'amount': -clientAmount,
-            'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
-            'notes': 'Settlement : $friendName [$dummyTransactionIds]',
-            'accountId': accountId,
-            'transactionType': 5,
-          },
-        );
+        if (localSettlementAmount > 0) {
+          await _mySqlService.executeWriteQuery(
+            'INSERT INTO Transactions '
+            '(AMOUNT, DATE, NOTES, FROM_ACCOUNT_ID, CATEGORY_ID, SUB_CATEGORY_ID, TRANSCATION_TYPE) '
+            'VALUES (:amount, :date, :notes, :accountId, NULL, NULL, :transactionType)',
+            {
+              'amount': -localSettlementAmount,
+              'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
+              'notes': 'Settlement : $friendName [$dummyTransactionIds]',
+              'accountId': accountId,
+              'transactionType': 5,
+            },
+          );
+        }
 
         for (final row in splitRows.whereType<Map>()) {
           final split = Map<String, dynamic>.from(row);
@@ -410,13 +420,14 @@ class SplitwiseRouteService {
             await _mySqlService.executeWriteQuery(
               'INSERT INTO Transactions '
               '(AMOUNT, DATE, NOTES, FROM_ACCOUNT_ID, CATEGORY_ID, SUB_CATEGORY_ID, TRANSCATION_TYPE) '
-              'VALUES (:amount, :date, :notes, NULL, :categoryId, :subCategoryId, :transactionType)',
+              'VALUES (:amount, :date, :notes, :accountId, :categoryId, :subCategoryId, :transactionType)',
               {
-                'amount': -splitAmount,
+                'amount': splitAmount,
                 'date': (importedDate ?? date ?? DateTime.now())
                     .millisecondsSinceEpoch,
                 'notes':
                     '${importedDescription?.isNotEmpty == true ? importedDescription : splitwiseTransactionId} : $friendName',
+                'accountId': accountId,
                 'categoryId': categoryId,
                 'subCategoryId': subCategoryId,
                 'transactionType': 1,
