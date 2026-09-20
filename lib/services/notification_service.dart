@@ -8,7 +8,6 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import '../main.dart';
 import '../screens/add_transaction_screen.dart';
-import '../screens/cc_statement_screen.dart';
 import 'api_service.dart';
 import 'direct_sql_service.dart';
 
@@ -237,13 +236,9 @@ class NotificationService {
   }
 
   void _routeNotificationData(Map<String, dynamic> data) {
-    if (data['isCCStatment'] == 'true' || data['isCCStatment'] == true) {
-      _navigateToCCStatement(data);
-    } else {
-      final tnxId = (data['tnxId'] ?? data['transactionId']) as String?;
-      if (tnxId != null) {
-        _navigateToTransaction(tnxId);
-      }
+    final tnxId = (data['tnxId'] ?? data['transactionId']) as String?;
+    if (tnxId != null) {
+      _navigateToTransaction(tnxId);
     }
   }
 
@@ -348,27 +343,4 @@ class NotificationService {
     }
   }
 
-  void _navigateToCCStatement(Map<String, dynamic> data) {
-    final nav = navigatorKey.currentState;
-    if (nav == null) return;
-
-    final messageId = data['messageId'] as String?;
-    final userId = data['userId'] as String?;
-    final folderId = data['folderId'] as String?;
-
-    if (messageId == null || userId == null || folderId == null) {
-      debugPrint('[FCM] Missing CC statement params: messageId=$messageId, userId=$userId, folderId=$folderId');
-      return;
-    }
-
-    nav.push(
-      MaterialPageRoute(
-        builder: (_) => CCStatementScreen.fromMail(
-          userId: userId,
-          folderId: folderId,
-          messageId: messageId,
-        ),
-      ),
-    );
-  }
 }

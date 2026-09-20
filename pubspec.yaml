@@ -19,8 +19,6 @@ dependencies:
   firebase_messaging: ^15.2.5
   flutter_local_notifications: ^18.0.1
   path_provider: ^2.1.4
-  flutter_pdfview: ^1.4.0
-  syncfusion_flutter_pdf: ^27.2.5
   flutter_dotenv: ^5.2.1
   url_launcher: ^6.3.1
   file_picker: ^10.3.3

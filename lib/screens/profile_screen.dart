@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
 import 'add_account_screen.dart';
 import 'add_category_screen.dart';
 import 'add_credit_cap_screen.dart';
 import 'add_subcategory_screen.dart';
 import 'analytics_screen.dart';
 import 'backup_schedule_screen.dart';
-import 'cc_statement_screen.dart';
 import 'credit_card_rewards_details_screen.dart';
 import 'local_server_screen.dart';
 import 'pay_cc_bill_screen.dart';
@@ -134,13 +132,6 @@ class ProfileScreen extends StatelessWidget {
               },
             ),
             const SizedBox(height: 20),
-            _buildSectionHeader('Statements'),
-            const SizedBox(height: 8),
-            _buildOptionTile(
-              icon: Icons.credit_card_outlined,
-              title: 'Upload CC Statement',
-              onTap: () => _pickAndOpenStatement(context),
-            ),
             _buildOptionTile(
               icon: Icons.schedule_outlined,
               title: 'Backup Schedule',
@@ -155,24 +146,6 @@ class ProfileScreen extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Future<void> _pickAndOpenStatement(BuildContext context) async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf'],
-    );
-    if (result == null || result.files.isEmpty) return;
-    final path = result.files.single.path;
-    if (path == null) return;
-    if (!context.mounted) return;
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CCStatementScreen.fromFile(localPdfPath: path),
       ),
     );
   }
