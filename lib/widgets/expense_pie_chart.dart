@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'dart:math';
 import '../services/api_service.dart';
+import '../services/direct_sql_service.dart';
 import '../models/models.dart' show Category;
 import '../utils/currency_formatter.dart';
 
@@ -62,8 +63,12 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
       final isCurrentMonth = _selectedYear == now.year && _selectedMonth == now.month;
       if (isCurrentMonth && widget.categories != null && widget.categories!.isNotEmpty) {
         final cats = widget.categories!;
-        _categories = _fromModelCategories(
-            cats.where((c) => c.type == 'expense').toList(), _expenseColors);
+        final month = DateFormat('MMM').format(now).toLowerCase();
+        final expenseData = await DirectSqlService.getMonthlyExpenses(
+          month,
+          now.year.toString(),
+        );
+        _categories = _parseCategories(expenseData, _expenseColors);
         _incomeCategories = _fromModelCategories(
             cats.where((c) => c.type == 'income').toList(), _incomeColors);
         _investmentCategories = _fromModelCategories(
@@ -75,7 +80,7 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
         final month = DateFormat('MMM').format(DateTime(_selectedYear, _selectedMonth)).toLowerCase();
         final year = _selectedYear.toString();
         final results = await Future.wait([
-          _api.getMonthlyExpenses(month: month, year: year),
+          DirectSqlService.getMonthlyExpenses(month, year),
           _api.getMonthlyIncome(month: month, year: year),
           _api.getMonthlyInvestments(month: month, year: year),
           _api.getCategories(type: 'expense'),

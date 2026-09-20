@@ -1172,6 +1172,159 @@ WHERE a.IS_ACTIVE = 1
     }).toList();
   }
 
+  static Future<Map<String, dynamic>> getMonthlyExpenses(
+      String month, String year) async {
+    final results = await Future.wait<dynamic>([
+      getAllTransactions(month, year),
+      getAllCategoriesAndSubCategories(type: 'expense'),
+      _getPendingSplitwiseExpenses(),
+    ]);
+
+    final transactions = results[0] as List<TransactionModel>;
+    final categories = results[1] as List<Category>;
+    final pendingSplitwiseExpenses =
+        results[2] as List<Map<String, dynamic>>;
+    final groupedExpenses = <String, Map<String, double>>{};
+
+    void addAmount(String category, String subCategory, double amount) {
+      final categoryName = category.isEmpty ? 'Uncategorized' : category;
+      final subCategoryName =
+          subCategory.isEmpty ? 'Uncategorized' : subCategory;
+      final subCategories =
+          groupedExpenses.putIfAbsent(categoryName, () => <String, double>{});
+      subCategories[subCategoryName] =
+          (subCategories[subCategoryName] ?? 0) + amount;
+    }
+
+    final expenseTransactions =
+      transactions.where((transaction) => transaction.type == 'expense').toList();
+    for (final transaction in expenseTransactions) {
+      addAmount(
+        transaction.category ?? '',
+        transaction.subCategory ?? '',
+        transaction.amount,
+      );
+
+      for (final detail in transaction.splitwiseDetails ?? const []) {
+        if (detail is Map && detail['isSettled'] != true) {
+          addAmount(
+            transaction.category ?? '',
+            transaction.subCategory ?? '',
+            -_toDouble(detail['splitedAmount']),
+          );
+        }
+      }
+    }
+
+    for (final expense in pendingSplitwiseExpenses) {
+      addAmount(
+        expense['category']?.toString() ?? '',
+        expense['subCategory']?.toString() ?? '',
+        _toDouble(expense['amount']),
+      );
+    }
+
+    final parsedYear = int.tryParse(year);
+    if (parsedYear == null) {
+      throw FormatException('Invalid year value: $year');
+    }
+
+    final monthlyExpenses = <Map<String, dynamic>>[];
+    for (final categoryEntry in groupedExpenses.entries) {
+      for (final subCategoryEntry in categoryEntry.value.entries) {
+        if (subCategoryEntry.value == 0) {
+          continue;
+        }
+        monthlyExpenses.add({
+          'year': parsedYear,
+          'month': month,
+          'category': categoryEntry.key,
+          'subCategory': subCategoryEntry.key,
+          'expense': '₹${subCategoryEntry.value.toStringAsFixed(2)}',
+        });
+      }
+    }
+
+    final totalUnsettledSplitwiseExpense = expenseTransactions.fold<double>(
+      0,
+      (total, transaction) => total +
+          (transaction.splitwiseDetails ?? const [])
+              .where((detail) => detail is Map && detail['isSettled'] != true)
+              .fold<double>(
+                0,
+                (splitTotal, detail) =>
+                    splitTotal + _toDouble(detail['splitedAmount']),
+              ),
+    );
+
+    return {
+      'monthlyExpenses': monthlyExpenses,
+      'totalUnsettledSplitwiseExpense': totalUnsettledSplitwiseExpense,
+      'rawTransactions': expenseTransactions
+          .map((transaction) {
+                final unsettledSplitwiseDetails =
+                    (transaction.splitwiseDetails ?? const [])
+                        .where((detail) =>
+                            detail is Map && detail['isSettled'] != true)
+                        .map((detail) => Map<String, dynamic>.from(detail as Map))
+                        .toList();
+                final unsettledSplitwiseAmount = unsettledSplitwiseDetails.fold<double>(
+                  0,
+                  (total, detail) => total + _toDouble(detail['splitedAmount']),
+                );
+                return {
+                'id': transaction.id,
+                'date': transaction.date,
+                'description': transaction.description,
+                'amount': transaction.amount,
+                'type': 'Expense',
+                'category': transaction.category ?? '',
+                'subCategory': transaction.subCategory ?? '',
+                'unsettledSplitwiseAmount': unsettledSplitwiseAmount,
+                'unsettledSplitwiseDetails': unsettledSplitwiseDetails,
+              };
+            })
+          .toList(),
+      'categories': categories
+          .map((category) => {
+                'id': category.id,
+                'name': category.name,
+              })
+          .toList(),
+      'subCategories': categories
+          .expand((category) => category.subCategories)
+          .map((subCategory) => {
+                'id': subCategory.id,
+                'name': subCategory.name,
+                'categoryId': subCategory.categoryId,
+              })
+          .toList(),
+    };
+  }
+
+  static Future<List<Map<String, dynamic>>> _getPendingSplitwiseExpenses() async {
+    const sql = '''
+SELECT st.SPLITED_AMOUNT, sf.NAME AS FRIEND_NAME
+FROM SplitwiseTransactions st
+INNER JOIN SplitwiseFriends sf ON sf.ID = st.FRIEND_ID
+WHERE st.TRANSACTION_ID IS NULL AND COALESCE(st.IS_SETTLED, 0) = 0
+''';
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+    final results = await service.executeReadQuery(sql);
+    final rows = results['rows'] as List? ?? [];
+
+    return rows.map((row) {
+      final rowMap = Map<String, dynamic>.from(row as Map);
+      return {
+        'category': 'From Splitwise',
+        'subCategory': rowMap['FRIEND_NAME']?.toString() ?? '',
+        'amount': _toDouble(rowMap['SPLITED_AMOUNT']),
+      };
+    }).toList();
+  }
+
   static Future<Map<String, double>> getTransactionTypesSum(
       String month, String year) async {
     final range = _getMonthRangeTimestamps(month, year);
@@ -1229,7 +1382,7 @@ WHERE a.IS_ACTIVE = 1
         "  GROUP BY TRANSACTION_ID"
         "), "
         "expense_income_summary AS ("
-        "  SELECT t.CATEGORY_ID, SUM(t.AMOUNT - COALESCE(s.total_split, 0)) AS total_amount "
+        "  SELECT COALESCE(t.CATEGORY_ID, 0) AS category_id, SUM(t.AMOUNT - COALESCE(s.total_split, 0)) AS total_amount "
         "  FROM Transactions t "
         "  LEFT JOIN splits s ON s.TRANSACTION_ID = t.ID "
         "  WHERE t.TRANSCATION_TYPE IN (1, 2) "
@@ -1258,6 +1411,19 @@ WHERE a.IS_ACTIVE = 1
         "LEFT JOIN SubCategory s ON s.CATEGORY_ID = c.ID "
         "LEFT JOIN expense_income_summary eis ON eis.CATEGORY_ID = c.ID "
         "WHERE c.CATEGORY_TYPE IN (1, 2) "
+        "UNION ALL "
+        "SELECT "
+        "  'uncategorized_expense' AS category_id, "
+        "  'Uncategorized' AS category_name, "
+        "  0 AS category_budget, "
+        "  1 AS category_type, "
+        "  NULL AS sub_category_id, "
+        "  NULL AS sub_category_parent_id, "
+        "  NULL AS sub_category_name, "
+        "  0 AS sub_category_budget, "
+        "  COALESCE(eis.total_amount, 0) AS category_total_amount "
+        "FROM expense_income_summary eis "
+        "WHERE eis.category_id = 0 "
         "UNION ALL "
         "SELECT "
         "  CONCAT('inv_', a.ID) AS category_id, "

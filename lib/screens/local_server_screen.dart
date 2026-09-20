@@ -120,6 +120,14 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
         continue;
       }
 
+      if (path == '/api/monthly-expenses') {
+        await _serveMonthlyExpenses(
+          request.response,
+          request.uri.queryParameters,
+        );
+        continue;
+      }
+
       if (path == '/' || path == '/api/accounts') {
         await _serveActiveAccounts(request.response);
         continue;
@@ -132,6 +140,50 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
           'error': 'Endpoint not found',
         },
         statusCode: HttpStatus.notFound,
+      );
+    }
+  }
+
+  Future<void> _serveMonthlyExpenses(
+    HttpResponse response,
+    Map<String, String> queryParameters,
+  ) async {
+    final month = queryParameters['month'];
+    final year = queryParameters['year'];
+    if (month == null || month.isEmpty || year == null || year.isEmpty) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': 'Month and year are required query parameters.',
+        },
+        statusCode: HttpStatus.badRequest,
+      );
+      return;
+    }
+
+    try {
+      _writeJson(
+        response,
+        await DirectSqlService.getMonthlyExpenses(month, year),
+      );
+    } on FormatException catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.message,
+        },
+        statusCode: HttpStatus.badRequest,
+      );
+    } catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.toString(),
+        },
+        statusCode: HttpStatus.internalServerError,
       );
     }
   }
@@ -342,7 +394,7 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
             ],
             const SizedBox(height: 12),
             const Text(
-              'Endpoints:\nGET /health\nGET /api/bank-details\nGET /api/accounts\nGET / (returns all active accounts)',
+              'Endpoints:\nGET /health\nGET /api/bank-details\nGET /api/monthly-expenses?month=sep&year=2026\nGET /api/accounts\nGET / (returns all active accounts)',
               style: TextStyle(fontSize: 14, color: Colors.black87),
             ),
             const SizedBox(height: 8),

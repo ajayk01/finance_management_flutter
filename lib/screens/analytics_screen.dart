@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
+import '../services/direct_sql_service.dart';
 import '../utils/currency_formatter.dart';
 
 class AnalyticsScreen extends StatefulWidget {
@@ -85,7 +86,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       } else if (_mainTab == 0) {
         detailData = await _api.getMonthlyIncome(month: month, year: year);
       } else if (_mainTab == 1) {
-        detailData = await _api.getMonthlyExpenses(month: month, year: year);
+        detailData = await DirectSqlService.getMonthlyExpenses(month, year);
       } else {
         detailData = _categoriesCache ?? await _api.getCategories(type: 'expense');
         _categoriesCache = detailData;
@@ -215,7 +216,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       } else if (_mainTab == 0) {
         detailData = await _api.getMonthlyIncome(month: month, year: year);
       } else {
-        detailData = await _api.getMonthlyExpenses(month: month, year: year);
+        detailData = await DirectSqlService.getMonthlyExpenses(month, year);
       }
       _monthDetailCache[detailKey] = detailData;
 

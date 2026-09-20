@@ -179,14 +179,6 @@ class ApiService {
           List<Map<String, dynamic>> transactions) =>
       _post('/mf-portfolio-analysis', {'transactions': transactions});
 
-  // ─── 21. Monthly Expenses ─────────────────────────────────
-
-  Future<Map<String, dynamic>> getMonthlyExpenses({
-    required String month,
-    required String year,
-  }) =>
-      _get('/monthly-expenses', {'month': month, 'year': year});
-
   // ─── 22. Monthly Income ───────────────────────────────────
 
   Future<Map<String, dynamic>> getMonthlyIncome({
