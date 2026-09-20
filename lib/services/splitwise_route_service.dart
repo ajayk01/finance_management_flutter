@@ -170,6 +170,68 @@ class SplitwiseRouteService {
     }).toList();
   }
 
+  Future<List<Map<String, dynamic>>> getUnsettledFriendExpenses({
+    required String dbFriendId,
+    Future<void> Function()? reauthenticate,
+  }) async {
+    final friendId = _toInt(dbFriendId);
+    if (friendId == null) {
+      throw ArgumentError('Invalid friend ID');
+    }
+
+    final config = MySqlConfig.fromDotEnv();
+    await _mySqlService.connect(config);
+    try {
+      final result = await _mySqlService.executeReadQuery(
+        'SELECT st.SPLITWISE_TRANSACTION_ID, st.TRANSACTION_ID, '
+        'st.SPLITED_AMOUNT, t.DATE, t.NOTES '
+        'FROM SplitwiseTransactions st '
+        'LEFT JOIN Transactions t ON t.ID = st.TRANSACTION_ID '
+        'WHERE st.FRIEND_ID = :friendId '
+        'AND COALESCE(st.IS_SETTLED, 0) = 0 '
+        'ORDER BY t.DATE ASC',
+        {'friendId': friendId},
+      );
+      final rows = result['rows'] as List? ?? const [];
+      final expenses = <Map<String, dynamic>>[];
+      for (final row in rows.whereType<Map>()) {
+        final data = Map<String, dynamic>.from(row);
+        final timestamp = _toInt(data['DATE']);
+        final expense = <String, dynamic>{
+          'id': data['SPLITWISE_TRANSACTION_ID']?.toString() ?? '',
+          'transactionId': data['TRANSACTION_ID']?.toString() ?? '',
+          'isImported': data['TRANSACTION_ID'] == null,
+          'description': data['NOTES']?.toString() ?? 'Splitwise expense',
+          'date': timestamp == null
+              ? ''
+              : DateTime.fromMillisecondsSinceEpoch(timestamp)
+                  .toIso8601String(),
+          'amount': _toDouble(data['SPLITED_AMOUNT']),
+          'totalAmount': _toDouble(data['SPLITED_AMOUNT']),
+        };
+        if (expense['isImported'] == true &&
+            expense['id'].toString().isNotEmpty) {
+          final detail = await _fetchSplitwise(
+            'get_expense/${expense['id']}',
+            reauthenticate ?? _missingReauthentication,
+          );
+          final splitwiseExpense = detail['expense'];
+          if (splitwiseExpense is Map) {
+            expense['description'] =
+                splitwiseExpense['description']?.toString() ??
+                    expense['description'];
+            expense['date'] =
+                splitwiseExpense['date']?.toString() ?? expense['date'];
+          }
+        }
+        expenses.add(expense);
+      }
+      return expenses;
+    } finally {
+      await _mySqlService.disconnect();
+    }
+  }
+
   Future<void> createPayment({
     required String friendId,
     required double amount,
@@ -197,6 +259,193 @@ class SplitwiseRouteService {
       },
       reauthenticate ?? _missingReauthentication,
     );
+  }
+
+  Future<void> settleLocalExpenses({
+    required String dbFriendId,
+    required String bankAccountId,
+    required double clientAmount,
+    required List<String> selectedSplitwiseTransactionIds,
+    Map<String, Map<String, String?>> importedCategories = const {},
+    Map<String, Map<String, dynamic>> importedExpenseDetails = const {},
+    Map<String, String> updatedDescriptions = const {},
+    DateTime? date,
+  }) async {
+    final friendId = _toInt(dbFriendId);
+    final accountId = _toInt(bankAccountId);
+    if (friendId == null || accountId == null) {
+      throw ArgumentError('Invalid friend or bank account ID');
+    }
+    final selectedIds = selectedSplitwiseTransactionIds
+        .where((id) => id.trim().isNotEmpty)
+        .toSet()
+        .toList();
+    if (selectedIds.isEmpty) {
+      throw ArgumentError('Select at least one Splitwise expense');
+    }
+
+    final config = MySqlConfig.fromDotEnv();
+    await _mySqlService.connect(config);
+    try {
+      final friendResult = await _mySqlService.executeReadQuery(
+        'SELECT NAME FROM SplitwiseFriends WHERE ID = :friendId LIMIT 1',
+        {'friendId': friendId},
+      );
+      final friendRows = friendResult['rows'] as List? ?? const [];
+      if (friendRows.isEmpty) {
+        throw StateError('Friend not found');
+      }
+      final friendName =
+          Map<String, dynamic>.from(friendRows.first as Map)['NAME']
+                  ?.toString() ??
+              '';
+
+      final selectedSql = List.generate(
+        selectedIds.length,
+        (index) => ':splitwiseId$index',
+      ).join(', ');
+      final splitParams = <String, dynamic>{'friendId': friendId};
+      for (var index = 0; index < selectedIds.length; index++) {
+        splitParams['splitwiseId$index'] = selectedIds[index];
+      }
+      final splitsResult = await _mySqlService.executeReadQuery(
+        'SELECT st.SPLITWISE_TRANSACTION_ID, st.TRANSACTION_ID, '
+        'st.SPLITED_AMOUNT, st.SPLITED_TRANSACTION_ID, t.NOTES, '
+        't.CATEGORY_ID, t.SUB_CATEGORY_ID '
+        'FROM SplitwiseTransactions st '
+        'LEFT JOIN Transactions t ON t.ID = st.TRANSACTION_ID '
+        'WHERE st.FRIEND_ID = :friendId AND COALESCE(st.IS_SETTLED, 0) = 0 '
+        'AND st.SPLITWISE_TRANSACTION_ID IN ($selectedSql) '
+        'ORDER BY t.DATE ASC',
+        splitParams,
+      );
+      final splitRows = splitsResult['rows'] as List? ?? const [];
+      final dbAmount = splitRows.whereType<Map>().fold<double>(0, (total, row) {
+        return total + _toDouble(row['SPLITED_AMOUNT']);
+      });
+      if ((dbAmount - clientAmount).abs() > 0.01) {
+        throw StateError(
+          'Settlement amount must match the DB amount: ${dbAmount.toStringAsFixed(2)}',
+        );
+      }
+      if (dbAmount <= 0) {
+        throw StateError('No unpaid Splitwise expenses to settle');
+      }
+
+      await _mySqlService.executeWriteQuery('START TRANSACTION');
+      try {
+        final dummyTransactionIds = splitRows
+            .whereType<Map>()
+            .map((row) => _toInt(row['SPLITED_TRANSACTION_ID']))
+            .whereType<int>()
+            .join(', ');
+        await _mySqlService.executeWriteQuery(
+          'INSERT INTO Transactions '
+          '(AMOUNT, DATE, NOTES, FROM_ACCOUNT_ID, CATEGORY_ID, SUB_CATEGORY_ID, TRANSCATION_TYPE) '
+          'VALUES (:amount, :date, :notes, :accountId, NULL, NULL, :transactionType)',
+          {
+            'amount': -clientAmount,
+            'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
+            'notes': 'Settlement : $friendName [$dummyTransactionIds]',
+            'accountId': accountId,
+            'transactionType': 5,
+          },
+        );
+
+        for (final row in splitRows.whereType<Map>()) {
+          final split = Map<String, dynamic>.from(row);
+          final splitAmount = _toDouble(split['SPLITED_AMOUNT']);
+          final dummyTransactionId = _toInt(split['SPLITED_TRANSACTION_ID']);
+          final transactionId = _toInt(split['TRANSACTION_ID']);
+          final splitwiseTransactionId =
+              split['SPLITWISE_TRANSACTION_ID']?.toString() ?? '';
+          final categoryAssignment = transactionId == null
+              ? importedCategories[splitwiseTransactionId]
+              : null;
+          final importedExpense = transactionId == null
+              ? importedExpenseDetails[splitwiseTransactionId]
+              : null;
+          final categoryId = categoryAssignment == null
+              ? _toInt(split['CATEGORY_ID'])
+              : _toInt(categoryAssignment['categoryId']);
+          final subCategoryId = categoryAssignment == null
+              ? _toInt(split['SUB_CATEGORY_ID'])
+              : _toInt(categoryAssignment['subCategoryId']);
+
+          if (transactionId == null && categoryId == null) {
+            throw StateError(
+              'Select a category for imported Splitwise expense $splitwiseTransactionId',
+            );
+          }
+
+          if (dummyTransactionId != null) {
+            await _mySqlService.executeWriteQuery(
+              'UPDATE Transactions SET AMOUNT = AMOUNT - :amount, '
+              'NOTES = CASE WHEN NOTES IS NULL OR NOTES = \'\' '
+              'THEN CONCAT(:splitwiseId, \' : \', :friendName) '
+              'ELSE CONCAT(NOTES, \', \', :friendName) END, '
+              'CATEGORY_ID = COALESCE(CATEGORY_ID, :categoryId), '
+              'SUB_CATEGORY_ID = COALESCE(SUB_CATEGORY_ID, :subCategoryId) '
+              'WHERE ID = :id',
+              {
+                'amount': splitAmount,
+                'splitwiseId': splitwiseTransactionId,
+                'friendName': friendName,
+                'categoryId': categoryId,
+                'subCategoryId': subCategoryId,
+                'id': dummyTransactionId,
+              },
+            );
+          }
+
+          if (transactionId == null) {
+            final importedDate = DateTime.tryParse(
+              importedExpense?['date']?.toString() ?? '',
+            );
+            final editedDescription =
+                updatedDescriptions[splitwiseTransactionId]?.trim();
+            final importedDescription = editedDescription?.isNotEmpty == true
+                ? editedDescription
+                : importedExpense?['description']?.toString().trim();
+            await _mySqlService.executeWriteQuery(
+              'INSERT INTO Transactions '
+              '(AMOUNT, DATE, NOTES, FROM_ACCOUNT_ID, CATEGORY_ID, SUB_CATEGORY_ID, TRANSCATION_TYPE) '
+              'VALUES (:amount, :date, :notes, NULL, :categoryId, :subCategoryId, :transactionType)',
+              {
+                'amount': -splitAmount,
+                'date': (importedDate ?? date ?? DateTime.now())
+                    .millisecondsSinceEpoch,
+                'notes':
+                    '${importedDescription?.isNotEmpty == true ? importedDescription : splitwiseTransactionId} : $friendName',
+                'categoryId': categoryId,
+                'subCategoryId': subCategoryId,
+                'transactionType': 1,
+              },
+            );
+            await _mySqlService.executeWriteQuery(
+              'DELETE FROM SplitwiseTransactions '
+              'WHERE SPLITWISE_TRANSACTION_ID = :splitwiseId '
+              'AND FRIEND_ID = :friendId AND TRANSACTION_ID IS NULL '
+              'AND COALESCE(IS_SETTLED, 0) = 0',
+              {'splitwiseId': splitwiseTransactionId, 'friendId': friendId},
+            );
+          } else {
+            await _mySqlService.executeWriteQuery(
+              'UPDATE SplitwiseTransactions SET IS_SETTLED = 1 '
+              'WHERE TRANSACTION_ID = :transactionId AND FRIEND_ID = :friendId '
+              'AND COALESCE(IS_SETTLED, 0) = 0',
+              {'transactionId': transactionId, 'friendId': friendId},
+            );
+          }
+        }
+        await _mySqlService.executeWriteQuery('COMMIT');
+      } catch (_) {
+        await _mySqlService.executeWriteQuery('ROLLBACK');
+        rethrow;
+      }
+    } finally {
+      await _mySqlService.disconnect();
+    }
   }
 
   Future<int> syncNotifications({
