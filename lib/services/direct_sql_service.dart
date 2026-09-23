@@ -179,8 +179,8 @@ VALUES (
     :transactionType,
     :categoryId,
     :subCategoryId,
-    :fromAccountId,
     NULL,
+    :toAccountId,
     :notes,
     :date
 )
@@ -215,7 +215,7 @@ VALUES (
       'transactionType': 2,
       'categoryId': parsedCategoryId,
       'subCategoryId': parsedSubCategoryId,
-      'fromAccountId': parsedAccountId,
+      'toAccountId': parsedAccountId,
       'notes': notes.trim(),
       'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
     };
@@ -594,8 +594,8 @@ SET
     TRANSCATION_TYPE = :transactionType,
     CATEGORY_ID = :categoryId,
     SUB_CATEGORY_ID = :subCategoryId,
-    FROM_ACCOUNT_ID = :fromAccountId,
-    TO_ACCOUNT_ID = NULL,
+    FROM_ACCOUNT_ID = NULL,
+    TO_ACCOUNT_ID = :toAccountId,
     NOTES = :notes,
     DATE = :date
 WHERE ID = :id
@@ -636,7 +636,7 @@ WHERE ID = :id
       'transactionType': 2,
       'categoryId': parsedCategoryId,
       'subCategoryId': parsedSubCategoryId,
-      'fromAccountId': parsedAccountId,
+      'toAccountId': parsedAccountId,
       'notes': notes.trim(),
       'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
     };
@@ -928,6 +928,7 @@ WHERE ID = :id
     final type = _mapTransactionType(rowMap['transaction_type']);
     final isTransfer = type == 'transfer';
     final isInvestment = type == 'investment';
+    final isIncome = type == 'income';
 
     return TransactionModel.fromJson({
       'id': rowMap['id'],
@@ -941,8 +942,12 @@ WHERE ID = :id
               (isInvestment ? 'Investment' : null)),
       'subCategory':
           isTransfer ? rowMap['to_account_name'] : rowMap['sub_category_name'],
-      'accountId': rowMap['from_account_id']?.toString(),
-      'accountName': rowMap['from_account_name'],
+      'accountId': (isIncome
+              ? rowMap['to_account_id']
+              : rowMap['from_account_id'])
+          ?.toString(),
+      'accountName':
+          isIncome ? rowMap['to_account_name'] : rowMap['from_account_name'],
       'categoryId': rowMap['category_id']?.toString(),
       'subCategoryId': rowMap['sub_category_id']?.toString(),
       'investmentAccountId':
@@ -1125,6 +1130,7 @@ WHERE a.IS_ACTIVE = 1
       final type = _mapTransactionType(rowMap['transaction_type']);
       final isTransfer = type == 'transfer';
       final isInvestment = type == 'investment';
+      final isIncome = type == 'income';
       final splitwiseDetails = splitwiseByTransaction[transactionId] ??
           const <Map<String, dynamic>>[];
       final splitwiseUserIds = splitwiseDetails
@@ -1148,8 +1154,12 @@ WHERE a.IS_ACTIVE = 1
         'subCategory': isTransfer
             ? rowMap['to_account_name']
             : rowMap['sub_category_name'],
-        'accountId': rowMap['from_account_id']?.toString(),
-        'accountName': rowMap['from_account_name'],
+        'accountId': (isIncome
+                ? rowMap['to_account_id']
+                : rowMap['from_account_id'])
+            ?.toString(),
+        'accountName':
+            isIncome ? rowMap['to_account_name'] : rowMap['from_account_name'],
         'categoryId': rowMap['category_id']?.toString(),
         'subCategoryId': rowMap['sub_category_id']?.toString(),
         'investmentAccountId':
