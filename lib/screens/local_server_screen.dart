@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:finance_app/models/models.dart';
+import 'package:intl/intl.dart';
 import 'package:finance_app/services/direct_expense_service.dart';
 import 'package:finance_app/services/direct_sql_service.dart';
 import 'package:finance_app/services/splitwise_route_service.dart';
@@ -12,6 +13,178 @@ import 'package:flutter/material.dart';
 Map<String, dynamic> buildCreditCardCapsResponse(List<CreditCardCap> caps) {
   return {
     'caps': caps.map(_creditCardCapToJson).toList(),
+  };
+}
+
+Map<String, dynamic> buildTransactionsResponse(List<TransactionModel> transactions) {
+  return {
+    'transactions': transactions.map(_transactionToJson).toList(),
+  };
+}
+
+Map<String, dynamic> buildTotalInvestmentResponse({
+  required List<TransactionModel> transactions,
+  required List<InvestmentAccount> accounts,
+}) {
+  final investmentTransactions = transactions
+      .where((transaction) => transaction.type == 'investment')
+      .toList();
+
+  return {
+    'rawTransactions': investmentTransactions.map((transaction) {
+      final accountId =
+          transaction.investmentAccountId ?? transaction.accountId ?? '';
+      final accountName =
+          transaction.investmentAccountName ?? transaction.category ?? '';
+      final description = transaction.description.trim().isNotEmpty
+          ? transaction.description
+          : accountName.isNotEmpty
+              ? 'Total invested in $accountName'
+              : 'Total investment';
+
+      return {
+        'id': transaction.id,
+        'date': transaction.date.isNotEmpty ? transaction.date : null,
+        'description': description,
+        'amount': transaction.amount,
+        'type': 'Investment',
+        'category': accountName,
+        'subCategory': '',
+        'accountId': accountId,
+      };
+    }).toList(),
+    'investmentAccounts': accounts
+        .map((account) => {
+              'id': account.id,
+              'name': account.name,
+            })
+        .toList(),
+  };
+}
+
+Map<String, dynamic> buildMonthlyIncomeResponse(
+  List<TransactionModel> transactions,
+  List<Category> categories, {
+  required String month,
+  required String year,
+}) {
+  final incomeTransactions =
+      transactions.where((transaction) => transaction.type == 'income').toList();
+
+  final groupedIncome = <String, Map<String, double>>{};
+
+  void addAmount(String category, String subCategory, double amount) {
+    final categoryName = category.isEmpty ? 'Uncategorized' : category;
+    final subCategoryName = subCategory.isEmpty ? 'Uncategorized' : subCategory;
+    final subCategories =
+        groupedIncome.putIfAbsent(categoryName, () => <String, double>{});
+    subCategories[subCategoryName] =
+        (subCategories[subCategoryName] ?? 0) + amount;
+  }
+
+  for (final transaction in incomeTransactions) {
+    addAmount(
+      transaction.category ?? '',
+      transaction.subCategory ?? '',
+      transaction.amount,
+    );
+  }
+
+  final parsedYear = int.tryParse(year);
+  final monthlyIncome = <Map<String, dynamic>>[];
+  for (final categoryEntry in groupedIncome.entries) {
+    for (final subCategoryEntry in categoryEntry.value.entries) {
+      if (subCategoryEntry.value == 0) {
+        continue;
+      }
+      monthlyIncome.add({
+        'year': parsedYear ?? DateTime.now().year,
+        'month': month,
+        'category': categoryEntry.key,
+        'subCategory': subCategoryEntry.key,
+        'expense': '₹${subCategoryEntry.value.toStringAsFixed(2)}',
+      });
+    }
+  }
+
+  return {
+    'monthlyIncome': monthlyIncome,
+    'rawTransactions': incomeTransactions
+        .map((transaction) => {
+              'id': transaction.id,
+              'date': transaction.date,
+              'description': transaction.description,
+              'amount': transaction.amount,
+              'type': 'Income',
+              'category': transaction.category ?? '',
+              'subCategory': transaction.subCategory ?? '',
+            })
+        .toList(),
+    'categories': categories
+        .map((category) => {
+              'id': category.id,
+              'name': category.name,
+            })
+        .toList(),
+    'subCategories': categories
+        .expand((category) => category.subCategories)
+        .map((subCategory) => {
+              'id': subCategory.id,
+              'name': subCategory.name,
+              'categoryId': subCategory.categoryId,
+            })
+        .toList(),
+  };
+}
+
+Map<String, dynamic> buildMonthlyInvestmentsResponse({
+  required List<TransactionModel> transactions,
+  required List<InvestmentAccount> accounts,
+  required String month,
+  required String year,
+}) {
+  final investmentTransactions = transactions
+      .where((transaction) => transaction.type == 'investment')
+      .toList();
+
+  final groupedInvestments = <String, double>{};
+  for (final transaction in investmentTransactions) {
+    final category = transaction.category ?? '';
+    groupedInvestments[category.isEmpty ? 'Uncategorized' : category] =
+        (groupedInvestments[category.isEmpty ? 'Uncategorized' : category] ?? 0) +
+            transaction.amount;
+  }
+
+  final parsedYear = int.tryParse(year);
+  final monthlyInvestments = groupedInvestments.entries.map((entry) {
+    return {
+      'year': parsedYear ?? DateTime.now().year,
+      'month': month,
+      'category': entry.key,
+      'subCategory': '',
+      'expense': '₹${entry.value.toStringAsFixed(2)}',
+    };
+  }).toList();
+
+  return {
+    'monthlyInvestments': monthlyInvestments,
+    'rawTransactions': investmentTransactions
+        .map((transaction) => {
+              'id': transaction.id,
+              'date': transaction.date,
+              'description': transaction.description,
+              'amount': transaction.amount,
+              'type': 'Investment',
+              'category': transaction.category ?? '',
+              'subCategory': transaction.subCategory ?? '',
+            })
+        .toList(),
+    'investmentAccounts': accounts
+        .map((account) => {
+              'id': account.id,
+              'name': account.name,
+            })
+        .toList(),
   };
 }
 
@@ -26,6 +199,33 @@ Map<String, dynamic> _creditCardCapToJson(CreditCardCap cap) {
     'remainingAmount': cap.remainingAmount,
     'totalRewards': cap.totalRewards,
     'rewardPerAmount': cap.rewardPerAmount,
+  };
+}
+
+Map<String, dynamic> _transactionToJson(TransactionModel transaction) {
+  return {
+    'id': transaction.id,
+    'date': transaction.date,
+    'time': transaction.time,
+    'description': transaction.description,
+    'amount': transaction.amount,
+    'charges': transaction.charges,
+    'rewards': transaction.rewards,
+    'type': transaction.type,
+    'category': transaction.category,
+    'subCategory': transaction.subCategory,
+    'accountId': transaction.accountId,
+    'accountName': transaction.accountName,
+    'categoryId': transaction.categoryId,
+    'subCategoryId': transaction.subCategoryId,
+    'investmentAccountId': transaction.investmentAccountId,
+    'investmentAccountName': transaction.investmentAccountName,
+    'splitwiseDetails': transaction.splitwiseDetails ?? const <dynamic>[],
+    'splitwiseGroupId': transaction.splitwiseGroupId,
+    'splitwiseUserIds': transaction.splitwiseUserIds ?? const <dynamic>[],
+    'includeSplitwise': transaction.includeSplitwise,
+    'splitType': transaction.splitType,
+    'mccCodeId': transaction.mccCodeId,
   };
 }
 
@@ -127,6 +327,14 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
         continue;
       }
 
+      if (path == '/api/transactions') {
+        await _serveTransactions(
+          request.response,
+          request.uri.queryParameters,
+        );
+        continue;
+      }
+
       if (path.startsWith('/api/transactions')) {
         await _handleTransactionsRoute(request);
         continue;
@@ -149,8 +357,40 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
         continue;
       }
 
+      if (path == '/api/transactions') {
+        await _serveTransactions(
+          request.response,
+          request.uri.queryParameters,
+        );
+        continue;
+      }
+
       if (path == '/api/credit-card-caps') {
         await _serveCreditCardCaps(
+          request.response,
+          request.uri.queryParameters,
+        );
+        continue;
+      }
+
+      if (path == '/api/monthly-income') {
+        await _serveMonthlyIncome(
+          request.response,
+          request.uri.queryParameters,
+        );
+        continue;
+      }
+
+      if (path == '/api/total-investments') {
+        await _serveTotalInvestments(
+          request.response,
+          request.uri.queryParameters,
+        );
+        continue;
+      }
+
+      if (path == '/api/monthly-investments') {
+        await _serveMonthlyInvestments(
           request.response,
           request.uri.queryParameters,
         );
@@ -182,6 +422,201 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
           'error': 'Endpoint not found',
         },
         statusCode: HttpStatus.notFound,
+      );
+    }
+  }
+
+  Future<void> _serveTransactions(
+    HttpResponse response,
+    Map<String, String> queryParameters,
+  ) async {
+    final month = queryParameters['month'];
+    final year = queryParameters['year'];
+    final accountId = queryParameters['accountId'];
+    if (month == null || month.isEmpty || year == null || year.isEmpty) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': 'Month and year are required query parameters.',
+        },
+        statusCode: HttpStatus.badRequest,
+      );
+      return;
+    }
+
+    try {
+      final transactions = await DirectSqlService.getAllTransactions(
+        month,
+        year,
+        accountId: accountId,
+      );
+      _writeJson(response, buildTransactionsResponse(transactions));
+    } on FormatException catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.message,
+        },
+        statusCode: HttpStatus.badRequest,
+      );
+    } catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.toString(),
+        },
+        statusCode: HttpStatus.internalServerError,
+      );
+    }
+  }
+
+  Future<void> _serveMonthlyIncome(
+    HttpResponse response,
+    Map<String, String> queryParameters,
+  ) async {
+    final month = queryParameters['month'];
+    final year = queryParameters['year'];
+    if (month == null || month.isEmpty || year == null || year.isEmpty) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': 'Month and year are required query parameters.',
+        },
+        statusCode: HttpStatus.badRequest,
+      );
+      return;
+    }
+
+    try {
+      final transactions = await DirectSqlService.getAllTransactions(month, year);
+      final categories = await DirectSqlService.getAllCategoriesAndSubCategories(
+        type: 'income',
+      );
+      _writeJson(
+        response,
+        buildMonthlyIncomeResponse(
+          transactions,
+          categories,
+          month: month,
+          year: year,
+        ),
+      );
+    } on FormatException catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.message,
+        },
+        statusCode: HttpStatus.badRequest,
+      );
+    } catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.toString(),
+        },
+        statusCode: HttpStatus.internalServerError,
+      );
+    }
+  }
+
+  Future<void> _serveTotalInvestments(
+    HttpResponse response,
+    Map<String, String> queryParameters,
+  ) async {
+    final month = queryParameters['month'];
+    final year = queryParameters['year'];
+
+    try {
+      final accountsResult = await DirectSqlService.getAllActiveAccounts();
+      final targetMonth = month ?? DateFormat('MMM').format(DateTime.now()).toLowerCase();
+      final targetYear = year ?? DateTime.now().year.toString();
+      final transactions = await DirectSqlService.getAllTransactions(
+        targetMonth,
+        targetYear,
+      );
+
+      _writeJson(
+        response,
+        buildTotalInvestmentResponse(
+          transactions: transactions,
+          accounts: accountsResult.investmentAccounts,
+        ),
+      );
+    } on FormatException catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.message,
+        },
+        statusCode: HttpStatus.badRequest,
+      );
+    } catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.toString(),
+        },
+        statusCode: HttpStatus.internalServerError,
+      );
+    }
+  }
+
+  Future<void> _serveMonthlyInvestments(
+    HttpResponse response,
+    Map<String, String> queryParameters,
+  ) async {
+    final month = queryParameters['month'];
+    final year = queryParameters['year'];
+    if (month == null || month.isEmpty || year == null || year.isEmpty) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': 'Month and year are required query parameters.',
+        },
+        statusCode: HttpStatus.badRequest,
+      );
+      return;
+    }
+
+    try {
+      final accountsResult = await DirectSqlService.getAllActiveAccounts();
+      final transactions = await DirectSqlService.getAllTransactions(month, year);
+      _writeJson(
+        response,
+        buildMonthlyInvestmentsResponse(
+          transactions: transactions,
+          accounts: accountsResult.investmentAccounts,
+          month: month,
+          year: year,
+        ),
+      );
+    } on FormatException catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.message,
+        },
+        statusCode: HttpStatus.badRequest,
+      );
+    } catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.toString(),
+        },
+        statusCode: HttpStatus.internalServerError,
       );
     }
   }
@@ -237,6 +672,10 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
     final rest = segments.length > 2 ? segments.sublist(2) : const <String>[];
 
     try {
+      if (request.method == 'GET' && rest.isEmpty) {
+        await _serveTransactions(response, request.uri.queryParameters);
+        return;
+      }
       if (request.method == 'POST' && rest.length == 1) {
         await _addTransaction(rest[0], request, response);
         return;
@@ -766,7 +1205,7 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
             ],
             const SizedBox(height: 12),
             const Text(
-              'Endpoints:\nGET /health\nGET /api/bank-details\nGET /api/credit-card-caps?creditCardId=12\nGET /api/monthly-expenses?month=sep&year=2026\nGET /api/splitwise\nGET /api/accounts\nGET / (returns all active accounts)\n'
+              'Endpoints:\nGET /health\nGET /api/bank-details\nGET /api/transactions?month=sep&year=2026\nGET /api/credit-card-caps?creditCardId=12\nGET /api/monthly-expenses?month=sep&year=2026\nGET /api/splitwise\nGET /api/accounts\nGET / (returns all active accounts)\n'
               'POST /api/transactions/income|expense|transfer|investment\n'
               'PUT /api/transactions/{type}/{id}\n'
               'DELETE /api/transactions/{id}\n'

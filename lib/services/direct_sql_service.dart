@@ -1037,10 +1037,22 @@ WHERE a.IS_ACTIVE = 1
   }
 
   static Future<List<TransactionModel>> getAllTransactions(
-      String month, String year) async {
+      String month, String year, {String? accountId}) async {
     final range = _getMonthRangeTimestamps(month, year);
     final fromTimestamp = range.fromTimestamp;
     final toTimestamp = range.toTimestamp;
+
+    int? parsedAccountId;
+    if (accountId != null && accountId.trim().isNotEmpty) {
+      parsedAccountId = int.tryParse(accountId);
+      if (parsedAccountId == null) {
+        throw ArgumentError('Invalid accountId: $accountId');
+      }
+    }
+
+    final accountFilter = parsedAccountId == null
+        ? ''
+        : ' AND (t.FROM_ACCOUNT_ID = $parsedAccountId OR t.TO_ACCOUNT_ID = $parsedAccountId)';
 
     final sql = "SELECT "
         "t.ID AS id, "
@@ -1067,7 +1079,8 @@ WHERE a.IS_ACTIVE = 1
         "LEFT JOIN SubCategory s ON s.ID = t.SUB_CATEGORY_ID "
         "LEFT JOIN Accounts fa ON fa.ID = t.FROM_ACCOUNT_ID "
         "LEFT JOIN Accounts ta ON ta.ID = t.TO_ACCOUNT_ID "
-        "WHERE t.DATE >= $fromTimestamp AND t.DATE <= $toTimestamp "
+        "WHERE t.DATE >= $fromTimestamp AND t.DATE <= $toTimestamp"
+        "$accountFilter "
         "ORDER BY t.DATE DESC, t.ID DESC";
 
     debugPrint('getAllTransactions SQL:\n$sql', wrapWidth: 1024);
