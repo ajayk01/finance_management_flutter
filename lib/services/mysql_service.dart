@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' show max;
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:mysql_client/exception.dart';
 import 'package:mysql_client/mysql_client.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -48,7 +49,23 @@ class MySqlConfig {
 }
 
 class MySqlService {
+  static final MySqlService _instance = MySqlService._internal();
+
+  factory MySqlService() => _instance;
+
+  MySqlService._internal();
+
   MySQLConnection? _conn;
+  MySqlConfig? _lastConfig;
+
+  Future<void> _reconnectIfNeeded() async {
+    final config = _lastConfig;
+    if (config == null) {
+      throw StateError('MySQL config is not available for reconnect.');
+    }
+    await disconnect();
+    await connect(config);
+  }
 
   String _escapeIdentifier(String value) => value.replaceAll('`', '``');
 
@@ -91,13 +108,20 @@ class MySqlService {
   }
 
   Future<void> connect(MySqlConfig config) async {
-    if (_conn != null) {
-      return;
-    }
-
     final missing = config.missingKeys();
     if (missing.isNotEmpty) {
       throw ArgumentError('Missing MySQL config keys: ${missing.join(', ')}');
+    }
+
+    _lastConfig = config;
+
+    if (_conn != null) {
+      try {
+        await _conn!.execute('SELECT 1');
+        return;
+      } catch (_) {
+        await disconnect();
+      }
     }
 
     final connection = await MySQLConnection.createConnection(
@@ -157,36 +181,69 @@ class MySqlService {
     String query, [
     Map<String, dynamic>? params,
   ]) async {
-    final conn = _conn;
-    if (conn == null) {
-      throw StateError(
-          'MySQL connection is not initialized. Call connect() first.');
-    }
-
-    final result = await conn.execute(query, params);
-
-    final rows = result.rows.map((row) {
-      final map = <String, dynamic>{};
-      for (final col in result.cols) {
-        map[col.name] = row.typedColByName<dynamic>(col.name);
+    try {
+      final conn = _conn;
+      if (conn == null) {
+        throw StateError(
+            'MySQL connection is not initialized. Call connect() first.');
       }
-      return map;
-    }).toList();
 
-    return {'rows': rows};
+      final result = await conn.execute(query, params);
+
+      final rows = result.rows.map((row) {
+        final map = <String, dynamic>{};
+        for (final col in result.cols) {
+          map[col.name] = row.typedColByName<dynamic>(col.name);
+        }
+        return map;
+      }).toList();
+
+      return {'rows': rows};
+    } on MySQLClientException catch (error) {
+      if (error.message.contains('connection closed') && _lastConfig != null) {
+        await _reconnectIfNeeded();
+        final conn = _conn;
+        if (conn == null) {
+          throw StateError('MySQL reconnect failed.');
+        }
+        final result = await conn.execute(query, params);
+        final rows = result.rows.map((row) {
+          final map = <String, dynamic>{};
+          for (final col in result.cols) {
+            map[col.name] = row.typedColByName<dynamic>(col.name);
+          }
+          return map;
+        }).toList();
+        return {'rows': rows};
+      }
+      rethrow;
+    }
   }
 
   Future<void> executeWriteQuery(
     String query, [
     Map<String, dynamic>? params,
   ]) async {
-    final conn = _conn;
-    if (conn == null) {
-      throw StateError(
-          'MySQL connection is not initialized. Call connect() first.');
-    }
+    try {
+      final conn = _conn;
+      if (conn == null) {
+        throw StateError(
+            'MySQL connection is not initialized. Call connect() first.');
+      }
 
-    await conn.execute(query, params);
+      await conn.execute(query, params);
+    } on MySQLClientException catch (error) {
+      if (error.message.contains('connection closed') && _lastConfig != null) {
+        await _reconnectIfNeeded();
+        final conn = _conn;
+        if (conn == null) {
+          throw StateError('MySQL reconnect failed.');
+        }
+        await conn.execute(query, params);
+        return;
+      }
+      rethrow;
+    }
   }
 
   Future<List<String>> _loadTriggerDefinitions(MySQLConnection conn) async {

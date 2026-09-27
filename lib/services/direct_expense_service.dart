@@ -8,6 +8,17 @@ import 'splitwise_session_service.dart';
 class DirectExpenseService {
   static const int _transactionTypeExpense = 1;
 
+  static int calculateRewardPoints({
+    required double amount,
+    required double capPercentage,
+    required double rewardPerAmount,
+  }) {
+    final safeRewardUnit = rewardPerAmount <= 0 ? 100.0 : rewardPerAmount;
+    final safePercentage = capPercentage <= 0 ? 0.0 : capPercentage;
+    final wholeUnits = (amount / safeRewardUnit).floor();
+    return (wholeUnits * safePercentage).floor();
+  }
+
   static Future<Map<String, dynamic>> addExpense({
     required double amount,
     double charges = 0,
@@ -621,8 +632,11 @@ INSERT INTO SplitwiseTransactions (
     final rowMap = Map<String, dynamic>.from(rows.first as Map);
     final capPercentage = _toDouble(rowMap['CAP_PERCENTAGE']);
     final rewardPerAmount = _toDouble(rowMap['REWARD_PER_AMOUNT']);
-    final rewardUnit = rewardPerAmount <= 0 ? 100 : rewardPerAmount;
-    final rewards = (amount * capPercentage / rewardUnit).floor();
+    final rewards = calculateRewardPoints(
+      amount: amount,
+      capPercentage: capPercentage,
+      rewardPerAmount: rewardPerAmount,
+    );
 
     await service.executeWriteQuery(
       '''

@@ -211,6 +211,9 @@ Map<String, dynamic> _transactionToJson(TransactionModel transaction) {
     'amount': transaction.amount,
     'charges': transaction.charges,
     'rewards': transaction.rewards,
+    'rewardsBase': transaction.rewardsBase,
+    'rewardsExtra': transaction.rewardsExtra,
+    'rewardsName': transaction.rewardsName,
     'type': transaction.type,
     'category': transaction.category,
     'subCategory': transaction.subCategory,
@@ -335,20 +338,46 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
         continue;
       }
 
-      if (path.startsWith('/api/transactions')) {
-        await _handleTransactionsRoute(request);
+      if (path == '/api/addAccount') {
+        await _serveAddAccount(request);
         continue;
       }
 
-      if (request.method != 'GET') {
-        _writeJson(
+      if (path == '/api/categories') {
+        await _serveCategories(request.response, request.uri.queryParameters);
+        continue;
+      }
+
+      if (path == '/api/unaudited-expenses') {
+        await _serveUnauditedExpenses(
           request.response,
-          {
-            'ok': false,
-            'error': 'Only GET is supported for this endpoint',
-          },
-          statusCode: HttpStatus.methodNotAllowed,
+          request.uri.queryParameters,
         );
+        continue;
+      }
+
+      if (path == '/api/create-category') {
+        await _serveCreateCategory(request);
+        continue;
+      }
+
+      if (path == '/api/create-sub-category') {
+        await _serveCreateSubCategory(request);
+        continue;
+      }
+
+      if (path == '/api/pay-cc-bill') {
+        await _servePayCcBill(request);
+        continue;
+      }
+
+      if (path == '/api/delete-transactions' && request.method == 'POST') {
+        await _deleteTransactionsByIds(request, request.response);
+        continue;
+      }
+
+      if (path.startsWith('/api/transactions')) {
+        await _handleTransactionsRoute(request);
         continue;
       }
 
@@ -366,9 +395,25 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
       }
 
       if (path == '/api/credit-card-caps') {
+        if (request.method == 'POST') {
+          await _serveCreateCreditCardCap(request);
+          continue;
+        }
         await _serveCreditCardCaps(
           request.response,
           request.uri.queryParameters,
+        );
+        continue;
+      }
+
+      if (request.method != 'GET') {
+        _writeJson(
+          request.response,
+          {
+            'ok': false,
+            'error': 'Only GET is supported for this endpoint',
+          },
+          statusCode: HttpStatus.methodNotAllowed,
         );
         continue;
       }
@@ -402,6 +447,11 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
           request.response,
           request.uri.queryParameters,
         );
+        continue;
+      }
+
+      if (path == '/api/friends-balance') {
+        await _serveFriendsBalance(request.response);
         continue;
       }
 
@@ -665,6 +715,40 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
     }
   }
 
+  Future<void> _serveFriendsBalance(HttpResponse response) async {
+    try {
+      final friends = await SplitwiseRouteService().getFriends();
+      final mappedFriends = friends.map((friend) {
+        final friendId = friend['friendId']?.toString();
+        final parsedFriendId = friendId == null || friendId.isEmpty
+            ? null
+            : int.tryParse(friendId);
+
+        return {
+          'name': friend['name']?.toString() ?? '',
+          'splitwiseAmount': friend['splitwiseAmount'] is num
+              ? (friend['splitwiseAmount'] as num).toDouble()
+              : null,
+          'notionAmount': friend['notionAmount'] is num
+              ? (friend['notionAmount'] as num).toDouble()
+              : null,
+          if (parsedFriendId != null) 'friendId': parsedFriendId,
+        };
+      }).toList();
+
+      _writeJson(response, {'friends': mappedFriends});
+    } catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.toString(),
+        },
+        statusCode: HttpStatus.internalServerError,
+      );
+    }
+  }
+
   // Dispatches POST/PUT/DELETE under /api/transactions to the add/edit/delete handlers.
   Future<void> _handleTransactionsRoute(HttpRequest request) async {
     final response = request.response;
@@ -742,7 +826,7 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
         final includeSplitwise = body['includeSplitwise'] == true;
         await DirectExpenseService.addExpense(
           amount: _requireDouble(body, 'amount'),
-          charges: (body['charges'] as num?)?.toDouble() ?? 0,
+          charges: _optionalDouble(body['charges']) ?? 0,
           date: _requireString(body, 'date'),
           account: _requireMap(body, 'account'),
           description: body['description']?.toString(),
@@ -813,7 +897,7 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
         await DirectExpenseService.updateExpense(
           id: id,
           amount: _requireDouble(body, 'amount'),
-          charges: (body['charges'] as num?)?.toDouble() ?? 0,
+          charges: _optionalDouble(body['charges']) ?? 0,
           date: _requireString(body, 'date'),
           account: _requireMap(body, 'account'),
           categoryId: _requireString(body, 'categoryId'),
@@ -862,7 +946,7 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
     _writeJson(response, {'success': true});
   }
 
-  Future<void> _bulkDeleteTransactions(
+  Future<void> _deleteTransactionsByIds(
     HttpRequest request,
     HttpResponse response,
   ) async {
@@ -875,6 +959,13 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
 
     await DirectSqlService.deleteTransactions(ids);
     _writeJson(response, {'success': true, 'deletedCount': ids.length});
+  }
+
+  Future<void> _bulkDeleteTransactions(
+    HttpRequest request,
+    HttpResponse response,
+  ) async {
+    await _deleteTransactionsByIds(request, response);
   }
 
   Future<Map<String, dynamic>> _readJsonBody(HttpRequest request) async {
@@ -905,12 +996,71 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
     return parsed;
   }
 
+  double _requireNonNegativeDouble(Map<String, dynamic> body, String key) {
+    final value = _requireDouble(body, key);
+    if (value < 0) {
+      throw ArgumentError('$key must be non-negative');
+    }
+    return value;
+  }
+
+  double _requirePositiveDouble(Map<String, dynamic> body, String key) {
+    final value = _requireDouble(body, key);
+    if (value <= 0) {
+      throw ArgumentError('$key must be greater than 0');
+    }
+    return value;
+  }
+
+  double _requireDoubleInRange(
+    Map<String, dynamic> body,
+    String key,
+    double min,
+    double max,
+  ) {
+    final value = _requireDouble(body, key);
+    if (value < min || value > max) {
+      throw ArgumentError('$key must be between $min and $max');
+    }
+    return value;
+  }
+
+  double _requireMinDouble(Map<String, dynamic> body, String key, double min) {
+    final value = _requireDouble(body, key);
+    if (value < min) {
+      throw ArgumentError('$key must be >= $min');
+    }
+    return value;
+  }
+
+  int _requireInt(Map<String, dynamic> body, String key) {
+    final value = body[key];
+    if (value == null) {
+      throw ArgumentError('Missing required field: $key');
+    }
+
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+
+    final parsed = int.tryParse(value.toString());
+    if (parsed == null) {
+      throw ArgumentError('Missing/invalid required field: $key');
+    }
+    return parsed;
+  }
+
   Map<String, dynamic> _requireMap(Map<String, dynamic> body, String key) {
     final value = body[key];
     if (value is! Map) {
       throw ArgumentError('Missing required field: $key');
     }
     return Map<String, dynamic>.from(value);
+  }
+
+  double? _optionalDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString());
   }
 
   DateTime? _parseDate(dynamic value) {
@@ -925,9 +1075,13 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
 
   Map<String, double>? _optionalDoubleMap(dynamic value) {
     if (value is! Map) return null;
-    return value.map(
-      (key, val) => MapEntry(key.toString(), (val as num).toDouble()),
-    );
+    return value.map((key, val) {
+      final parsed = val is num ? val.toDouble() : double.tryParse(val.toString());
+      if (parsed == null) {
+        throw ArgumentError('Invalid numeric value for customAmounts[$key]');
+      }
+      return MapEntry(key.toString(), parsed);
+    });
   }
 
   // Reuses the same Splitwise re-login flow the transaction screens use.
@@ -977,6 +1131,450 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
           'ok': false,
           'error': e.toString(),
         },
+        statusCode: HttpStatus.internalServerError,
+      );
+    }
+  }
+
+  Future<void> _serveAddAccount(HttpRequest request) async {
+    final response = request.response;
+
+    if (request.method != 'POST') {
+      _writeJson(
+        response,
+        {'ok': false, 'error': 'Only POST is supported for this endpoint'},
+        statusCode: HttpStatus.methodNotAllowed,
+      );
+      return;
+    }
+
+    try {
+      final body = await _readJsonBody(request);
+      final accountName = _requireString(body, 'accountName');
+      final accountType = _requireString(body, 'accountType');
+      final normalizedAccountType = accountType.trim();
+      const allowedAccountTypes = {'Bank', 'Credit Card', 'Investment'};
+
+      if (!allowedAccountTypes.contains(normalizedAccountType)) {
+        throw ArgumentError(
+          'Invalid accountType: $accountType. Allowed values are Bank, Credit Card, Investment.',
+        );
+      }
+
+      final initialBalanceValue =
+          body.containsKey('initialBalance') && body['initialBalance'] != null
+              ? _requireDouble(body, 'initialBalance')
+              : 0.0;
+
+      double? totalLimitValue;
+      if (normalizedAccountType == 'Credit Card') {
+        if (!body.containsKey('totalLimit') || body['totalLimit'] == null) {
+          throw ArgumentError('Missing required field: totalLimit');
+        }
+        totalLimitValue = _requireDouble(body, 'totalLimit');
+      }
+
+      await DirectSqlService.createAccount(
+        accountName: accountName,
+        accountType: normalizedAccountType,
+        initialBalance: initialBalanceValue,
+        totalLimit: totalLimitValue,
+      );
+
+      _writeJson(
+        response,
+        {
+          'success': true,
+          'message': 'Account created',
+        },
+        statusCode: HttpStatus.created,
+      );
+    } on ArgumentError catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.message.toString()},
+        statusCode: HttpStatus.badRequest,
+      );
+    } on FormatException catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.message},
+        statusCode: HttpStatus.badRequest,
+      );
+    } catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.toString()},
+        statusCode: HttpStatus.internalServerError,
+      );
+    }
+  }
+
+  Future<void> _serveCategories(
+    HttpResponse response,
+    Map<String, String> queryParameters,
+  ) async {
+    try {
+      final type = (queryParameters['type'] ?? 'all').trim().toLowerCase();
+      final allowedTypes = {'all', 'expense', 'income', 'investment'};
+      if (!allowedTypes.contains(type)) {
+        _writeJson(
+          response,
+          {
+            'ok': false,
+            'error': 'Invalid type query parameter. Allowed values: all, expense, income, investment.',
+          },
+          statusCode: HttpStatus.badRequest,
+        );
+        return;
+      }
+
+      final categories = await DirectSqlService.getAllCategoriesAndSubCategories(
+        type: type,
+      );
+
+      final mappedCategories = categories.map((category) {
+        final normalizedType = category.type.toLowerCase();
+        return {
+          'id': category.id,
+          'name': category.name,
+          'budget': category.budget,
+          'type': normalizedType == 'expense'
+              ? 'Expense'
+              : normalizedType == 'income'
+                  ? 'Income'
+                  : 'Investment',
+        };
+      }).toList();
+
+      final mappedSubCategories = categories
+          .expand((category) => category.subCategories)
+          .map((subCategory) => {
+                'id': subCategory.id,
+                'categoryId': subCategory.categoryId,
+                'name': subCategory.name,
+                'budget': subCategory.budget,
+              })
+          .toList();
+
+      _writeJson(response, {
+        'categories': mappedCategories,
+        'subCategories': mappedSubCategories,
+      });
+    } catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.toString(),
+        },
+        statusCode: HttpStatus.internalServerError,
+      );
+    }
+  }
+
+  Future<void> _serveUnauditedExpenses(
+    HttpResponse response,
+    Map<String, String> queryParameters,
+  ) async {
+    try {
+      final hasMonth = (queryParameters['month'] ?? '').trim().isNotEmpty;
+      final hasYear = (queryParameters['year'] ?? '').trim().isNotEmpty;
+
+      final transactions = hasMonth && hasYear
+          ? await DirectSqlService.getAllTransactions(
+              queryParameters['month']!,
+              queryParameters['year']!,
+            )
+          : await DirectSqlService.getAllTransactionsAcrossAllTime();
+
+      final unaudited = transactions.where((transaction) {
+        if (transaction.type != 'expense') return false;
+        final categoryId = transaction.categoryId ?? '';
+        final subCategoryId = transaction.subCategoryId ?? '';
+        return categoryId.trim().isEmpty || subCategoryId.trim().isEmpty;
+      }).map((transaction) => {
+        'id': transaction.id,
+        'date': transaction.date,
+        'amount': transaction.amount,
+        'accountName': transaction.accountName ?? '',
+        'description': transaction.description,
+        'categoryId': transaction.categoryId ?? '',
+        'subCategoryId': transaction.subCategoryId ?? '',
+        'category': transaction.category ?? '',
+        'subCategory': transaction.subCategory ?? '',
+      }).toList();
+
+      _writeJson(response, {'transactions': unaudited});
+    } catch (e) {
+      _writeJson(
+        response,
+        {
+          'ok': false,
+          'error': e.toString(),
+        },
+        statusCode: HttpStatus.internalServerError,
+      );
+    }
+  }
+
+  Future<void> _serveCreateCreditCardCap(HttpRequest request) async {
+    final response = request.response;
+
+    if (request.method != 'POST') {
+      _writeJson(
+        response,
+        {'ok': false, 'error': 'Only POST is supported for this endpoint'},
+        statusCode: HttpStatus.methodNotAllowed,
+      );
+      return;
+    }
+
+    try {
+      final body = await _readJsonBody(request);
+      final creditCardId = _requireString(body, 'creditCardId');
+      final capName = _requireString(body, 'capName');
+      final capTotalAmount = _requirePositiveDouble(body, 'capTotalAmount');
+      final capPercentage = _requireDoubleInRange(body, 'capPercentage', 0, 100);
+      final rewardPerAmount = _requireMinDouble(body, 'rewardPerAmount', 1);
+
+      if (creditCardId.trim().isEmpty) {
+        throw ArgumentError('Missing required field: creditCardId');
+      }
+      if (capName.trim().isEmpty) {
+        throw ArgumentError('Missing required field: capName');
+      }
+
+      _writeJson(
+        response,
+        {
+          'success': true,
+          'message': 'Credit card cap created',
+          'data': {
+            'creditCardId': creditCardId,
+            'capName': capName,
+            'capTotalAmount': capTotalAmount,
+            'capPercentage': capPercentage,
+            'rewardPerAmount': rewardPerAmount,
+          },
+        },
+        statusCode: HttpStatus.created,
+      );
+    } on ArgumentError catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.message.toString()},
+        statusCode: HttpStatus.badRequest,
+      );
+    } on FormatException catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.message},
+        statusCode: HttpStatus.badRequest,
+      );
+    } catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.toString()},
+        statusCode: HttpStatus.internalServerError,
+      );
+    }
+  }
+
+  Future<void> _serveCreateCategory(HttpRequest request) async {
+    final response = request.response;
+
+    if (request.method != 'POST') {
+      _writeJson(
+        response,
+        {'ok': false, 'error': 'Only POST is supported for this endpoint'},
+        statusCode: HttpStatus.methodNotAllowed,
+      );
+      return;
+    }
+
+    try {
+      final body = await _readJsonBody(request);
+      final categoryName = _requireString(body, 'categoryName');
+      final categoryType = _requireString(body, 'categoryType').trim().toLowerCase();
+      final allowedCategoryTypes = {'expense', 'income'};
+
+      if (!allowedCategoryTypes.contains(categoryType)) {
+        throw ArgumentError(
+          'Invalid categoryType: ${body['categoryType']}. Allowed values are expense, income.',
+        );
+      }
+
+      final budget =
+          body.containsKey('budget') && body['budget'] != null
+              ? _requireNonNegativeDouble(body, 'budget')
+              : 0.0;
+
+      await DirectSqlService.createCategory(
+        categoryName: categoryName,
+        categoryType: categoryType,
+        budget: budget,
+      );
+
+      _writeJson(
+        response,
+        {
+          'success': true,
+          'message': 'Category created',
+        },
+        statusCode: HttpStatus.created,
+      );
+    } on ArgumentError catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.message.toString()},
+        statusCode: HttpStatus.badRequest,
+      );
+    } on FormatException catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.message},
+        statusCode: HttpStatus.badRequest,
+      );
+    } catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.toString()},
+        statusCode: HttpStatus.internalServerError,
+      );
+    }
+  }
+
+  Future<void> _serveCreateSubCategory(HttpRequest request) async {
+    final response = request.response;
+
+    if (request.method != 'POST') {
+      _writeJson(
+        response,
+        {'ok': false, 'error': 'Only POST is supported for this endpoint'},
+        statusCode: HttpStatus.methodNotAllowed,
+      );
+      return;
+    }
+
+    try {
+      final body = await _readJsonBody(request);
+      final categoryId = _requireInt(body, 'categoryId');
+      final subCategoryName = _requireString(body, 'subCategoryName');
+      final budget =
+          body.containsKey('budget') && body['budget'] != null
+              ? _requireNonNegativeDouble(body, 'budget')
+              : 0.0;
+
+      await DirectSqlService.createSubcategory(
+        categoryId: categoryId,
+        subCategoryName: subCategoryName,
+        budget: budget,
+      );
+
+      _writeJson(
+        response,
+        {
+          'success': true,
+          'message': 'Sub-category created',
+        },
+        statusCode: HttpStatus.created,
+      );
+    } on ArgumentError catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.message.toString()},
+        statusCode: HttpStatus.badRequest,
+      );
+    } on FormatException catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.message},
+        statusCode: HttpStatus.badRequest,
+      );
+    } catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.toString()},
+        statusCode: HttpStatus.internalServerError,
+      );
+    }
+  }
+
+  Future<void> _servePayCcBill(HttpRequest request) async {
+    final response = request.response;
+
+    if (request.method != 'POST') {
+      _writeJson(
+        response,
+        {'ok': false, 'error': 'Only POST is supported for this endpoint'},
+        statusCode: HttpStatus.methodNotAllowed,
+      );
+      return;
+    }
+
+    try {
+      final body = await _readJsonBody(request);
+      final creditCardId = _requireString(body, 'creditCardId');
+      final bankAccountId = _requireString(body, 'bankAccountId');
+      final amount = _requirePositiveDouble(body, 'amount');
+      final date = _requireInt(body, 'date');
+      final description =
+          body['description']?.toString().trim().isNotEmpty == true
+              ? body['description'].toString().trim()
+              : 'Credit card payment for $creditCardId';
+
+      if (creditCardId.trim().isEmpty) {
+        throw ArgumentError('Missing required field: creditCardId');
+      }
+      if (bankAccountId.trim().isEmpty) {
+        throw ArgumentError('Missing required field: bankAccountId');
+      }
+      if (date <= 0) {
+        throw ArgumentError('date must be a valid timestamp in milliseconds');
+      }
+
+      await DirectSqlService.addTransferTransaction(
+        amount: amount,
+        fromAccountId: bankAccountId,
+        toAccountId: creditCardId,
+        notes: description,
+        date: DateTime.fromMillisecondsSinceEpoch(date),
+      );
+
+      _writeJson(
+        response,
+        {
+          'success': true,
+          'message': 'Credit card bill payment processed',
+          'transactionId': 'db-write-${DateTime.now().microsecondsSinceEpoch}',
+          'capsReset': true,
+          'data': {
+            'creditCardId': creditCardId,
+            'bankAccountId': bankAccountId,
+            'amount': amount,
+            'date': date,
+            'description': description,
+          },
+        },
+        statusCode: HttpStatus.created,
+      );
+    } on ArgumentError catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.message.toString()},
+        statusCode: HttpStatus.badRequest,
+      );
+    } on FormatException catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.message},
+        statusCode: HttpStatus.badRequest,
+      );
+    } catch (e) {
+      _writeJson(
+        response,
+        {'ok': false, 'error': e.toString()},
         statusCode: HttpStatus.internalServerError,
       );
     }
@@ -1106,8 +1704,14 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
 
   void _writeCorsHeaders(HttpResponse response) {
     response.headers.set(HttpHeaders.accessControlAllowOriginHeader, '*');
-    response.headers.set(HttpHeaders.accessControlAllowMethodsHeader, 'GET, OPTIONS');
-    response.headers.set(HttpHeaders.accessControlAllowHeadersHeader, 'Content-Type');
+    response.headers.set(
+      HttpHeaders.accessControlAllowMethodsHeader,
+      'GET, POST, OPTIONS',
+    );
+    response.headers.set(
+      HttpHeaders.accessControlAllowHeadersHeader,
+      'Content-Type, Authorization',
+    );
   }
 
   Future<String?> _getDeviceIp() async {

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' hide Category;
 import 'package:finance_app/models/models.dart';
+import 'package:finance_app/services/direct_expense_service.dart';
 import 'package:finance_app/services/mysql_service.dart';
 
 class ActiveAccountsResult {
@@ -53,6 +54,74 @@ class DirectSqlService {
       return double.tryParse(value) ?? 0;
     }
     return 0;
+  }
+
+  static ({double baseRewards, double extraRewards}) calculateRewardBreakdown({
+    required double amount,
+    required double totalRewards,
+    required List<Map<String, dynamic>> baseCaps,
+  }) {
+    double baseRewards = 0;
+    for (final cap in baseCaps) {
+      final capPercentage = _toDouble(cap['CAP_PERCENTAGE'] ?? cap['capPercentage']);
+      final rewardPerAmount =
+          _toDouble(cap['REWARD_PER_AMOUNT'] ?? cap['rewardPerAmount']);
+      final singleCapRewards = DirectExpenseService.calculateRewardPoints(
+        amount: amount,
+        capPercentage: capPercentage,
+        rewardPerAmount: rewardPerAmount,
+      );
+      baseRewards += singleCapRewards;
+    }
+
+    final extraRewards = totalRewards > baseRewards ? totalRewards - baseRewards : 0.0;
+    return (baseRewards: baseRewards, extraRewards: extraRewards);
+  }
+
+  static Future<String> _resolveRewardsNameForTransaction({
+    required MySqlService service,
+    required String transactionId,
+    required int accountId,
+    required List<Map<String, dynamic>> baseCaps,
+  }) async {
+    if (baseCaps.isEmpty) {
+      return '';
+    }
+
+    final baseCapPercentage = _toDouble(
+      baseCaps.first['CAP_PERCENTAGE'] ?? baseCaps.first['capPercentage']);
+    if (baseCapPercentage <= 0) {
+      return '';
+    }
+
+    final capQuery = "SELECT cccd.CAP_PERCENTAGE "
+        "FROM CreditCardTransactions cct "
+        "LEFT JOIN CreditCardCapDetails cccd ON cccd.ID = cct.CAP_ID "
+        "WHERE cct.TRANSACTION_ID = $transactionId AND cct.CREDIT_CARD_ID = $accountId "
+        "LIMIT 1";
+    final capResult = await service.executeReadQuery(capQuery);
+    final capRows = (capResult['rows'] as List? ?? [])
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+
+    if (capRows.isEmpty) {
+      return '';
+    }
+
+    final currentCapPercentage = _toDouble(
+      capRows.first['CAP_PERCENTAGE'] ?? capRows.first['capPercentage']);
+    final ratio = currentCapPercentage / baseCapPercentage;
+    if (ratio <= 0) {
+      return '';
+    }
+
+    final normalizedRatio = ratio == ratio.roundToDouble()
+        ? ratio.round().toString()
+        : ratio
+            .toStringAsFixed(2)
+            .replaceFirst(RegExp(r'0+$'), '')
+            .replaceFirst(RegExp(r'\.$'), '');
+    return '${normalizedRatio}x';
   }
 
   static int _monthToNumber(String month) {
@@ -1036,6 +1105,206 @@ WHERE a.IS_ACTIVE = 1
     );
   }
 
+  static Future<List<TransactionModel>> getAllTransactionsAcrossAllTime({
+    String? accountId,
+  }) async {
+    int? parsedAccountId;
+    if (accountId != null && accountId.trim().isNotEmpty) {
+      parsedAccountId = int.tryParse(accountId);
+      if (parsedAccountId == null) {
+        throw ArgumentError('Invalid accountId: $accountId');
+      }
+    }
+
+    final accountFilter = parsedAccountId == null
+        ? ''
+        : ' AND (t.FROM_ACCOUNT_ID = $parsedAccountId OR t.TO_ACCOUNT_ID = $parsedAccountId)';
+
+    final sql = "SELECT "
+        "t.ID AS id, "
+        "t.DATE AS date, "
+        "t.NOTES AS description, "
+        "t.AMOUNT AS amount, "
+        "t.TRANSCATION_TYPE AS transaction_type, "
+        "t.CATEGORY_ID AS category_id, "
+        "t.SUB_CATEGORY_ID AS sub_category_id, "
+        "t.FROM_ACCOUNT_ID AS from_account_id, "
+        "t.TO_ACCOUNT_ID AS to_account_id, "
+        "(SELECT COALESCE(SUM(cct.REWARDS), 0) "
+        "FROM CreditCardTransactions cct "
+        "WHERE cct.TRANSACTION_ID = t.ID) AS rewards, "
+        "(SELECT COALESCE(SUM(CASE WHEN cccd.IS_BASE_REWARD_CAP = 1 THEN cct.REWARDS ELSE 0 END), 0) "
+        "FROM CreditCardTransactions cct "
+        "LEFT JOIN CreditCardCapDetails cccd ON cccd.ID = cct.CAP_ID "
+        "WHERE cct.TRANSACTION_ID = t.ID) AS rewards_base, "
+        "(SELECT COALESCE(SUM(CASE WHEN cccd.IS_BASE_REWARD_CAP = 0 THEN cct.REWARDS ELSE 0 END), 0) "
+        "FROM CreditCardTransactions cct "
+        "LEFT JOIN CreditCardCapDetails cccd ON cccd.ID = cct.CAP_ID "
+        "WHERE cct.TRANSACTION_ID = t.ID) AS rewards_extra, "
+        "(SELECT COALESCE(cct.MCC_ID, NULL) "
+        "FROM CreditCardTransactions cct "
+        "WHERE cct.TRANSACTION_ID = t.ID LIMIT 1) AS mccCodeId, "
+        "c.CATEGORY_NAME AS category_name, "
+        "s.SUB_CATEGORY_NAME AS sub_category_name, "
+        "fa.ACCOUNT_NAME AS from_account_name, "
+        "ta.ACCOUNT_NAME AS to_account_name "
+        "FROM Transactions t "
+        "LEFT JOIN Category c ON c.ID = t.CATEGORY_ID "
+        "LEFT JOIN SubCategory s ON s.ID = t.SUB_CATEGORY_ID "
+        "LEFT JOIN Accounts fa ON fa.ID = t.FROM_ACCOUNT_ID "
+        "LEFT JOIN Accounts ta ON ta.ID = t.TO_ACCOUNT_ID "
+        "WHERE 1 = 1"
+        "$accountFilter "
+        "ORDER BY t.DATE DESC, t.ID DESC";
+
+    debugPrint('getAllTransactionsAcrossAllTime SQL:\n$sql', wrapWidth: 1024);
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+    final results = await service.executeReadQuery(sql);
+
+    final rows = (results['rows'] as List? ?? []);
+    final transactionIds = rows
+        .map((row) => Map<String, dynamic>.from(row as Map)['id']?.toString())
+        .where((id) => id != null && id.isNotEmpty)
+        .cast<String>()
+        .toList();
+
+    final splitwiseByTransaction = <String, List<Map<String, dynamic>>>{};
+    if (transactionIds.isNotEmpty) {
+      final inClause = transactionIds.join(',');
+      final splitwiseSql = "SELECT "
+          "st.TRANSACTION_ID AS transaction_id, "
+          "st.SPLITWISE_TRANSACTION_ID AS splitwise_transaction_id, "
+          "st.SPLITED_AMOUNT AS splited_amount, "
+          "COALESCE(st.IS_SETTLED, 0) AS is_settled, "
+          "sf.ID AS db_friend_id, "
+          "sf.SPLITWISE_FRIEND_ID AS splitwise_friend_id, "
+          "sf.NAME AS friend_name "
+          "FROM SplitwiseTransactions st "
+          "JOIN SplitwiseFriends sf ON sf.ID = st.FRIEND_ID "
+          "WHERE st.TRANSACTION_ID IN ($inClause) "
+          "ORDER BY st.TRANSACTION_ID, sf.NAME";
+      debugPrint('getAllTransactionsAcrossAllTime splitwise SQL:\n$splitwiseSql',
+          wrapWidth: 1024);
+      final splitwiseResults = await service.executeReadQuery(splitwiseSql);
+      final splitwiseRows = (splitwiseResults['rows'] as List? ?? []);
+      for (final splitwiseRow in splitwiseRows) {
+        final splitwiseMap = Map<String, dynamic>.from(splitwiseRow as Map);
+        final transactionId = splitwiseMap['transaction_id']?.toString();
+        if (transactionId == null || transactionId.isEmpty) {
+          continue;
+        }
+        final splitwiseFriendId =
+            splitwiseMap['splitwise_friend_id']?.toString();
+        final friendName = splitwiseMap['friend_name']?.toString();
+        final splitwiseEntry = {
+          'splitwiseTransactionId': splitwiseMap['splitwise_transaction_id']
+              ?.toString(),
+          'splitedAmount': _toDouble(splitwiseMap['splited_amount']),
+          'isSettled': (splitwiseMap['is_settled'] as num?)?.toInt() == 1,
+          'friendId': splitwiseFriendId,
+          'friendName': friendName,
+          'dbFriendId': splitwiseMap['db_friend_id']?.toString(),
+        };
+        final existing = splitwiseByTransaction[transactionId] ?? <Map<String, dynamic>>[];
+        existing.add(splitwiseEntry);
+        splitwiseByTransaction[transactionId] = existing;
+      }
+    }
+
+    final transactions = <TransactionModel>[];
+    for (final row in rows) {
+      final rowMap = Map<String, dynamic>.from(row as Map);
+      final transactionId = rowMap['id']?.toString() ?? '';
+      final description = rowMap['description']?.toString() ?? '';
+      final categoryName = rowMap['category_name']?.toString() ?? '';
+      final subCategoryName = rowMap['sub_category_name']?.toString() ?? '';
+      final fromAccountName = rowMap['from_account_name']?.toString() ?? '';
+      final toAccountName = rowMap['to_account_name']?.toString() ?? '';
+      final amount = _toDouble(rowMap['amount']);
+      final transactionType = rowMap['transaction_type']?.toString() ?? '';
+      final categoryId = rowMap['category_id']?.toString() ?? '';
+      final subCategoryId = rowMap['sub_category_id']?.toString() ?? '';
+      final fromAccountId = rowMap['from_account_id']?.toString() ?? '';
+      final toAccountId = rowMap['to_account_id']?.toString() ?? '';
+      final rewards = _toDouble(rowMap['rewards']);
+      final mccCodeId = rowMap['mccCodeId']?.toString();
+      String rewardsName = '';
+
+      final accountIdValue = transactionType == 'transfer'
+          ? fromAccountId
+          : fromAccountId.isNotEmpty
+              ? fromAccountId
+              : toAccountId;
+
+      double rewardsBase = 0;
+      double rewardsExtra = rewards;
+
+      if (transactionType == 'expense' && accountIdValue.isNotEmpty) {
+        final parsedAccountId = int.tryParse(accountIdValue);
+        if (parsedAccountId != null) {
+          final baseCapQuery = "SELECT CAP_PERCENTAGE, REWARD_PER_AMOUNT "
+              "FROM CreditCardCapDetails "
+              "WHERE CREDIT_CARD_ID = $parsedAccountId AND IS_BASE_REWARD_CAP = 1";
+          final config = MySqlConfig.fromDotEnv();
+          final service = MySqlService();
+          await service.connect(config);
+          final baseCapResult = await service.executeReadQuery(baseCapQuery);
+          final baseCaps = (baseCapResult['rows'] as List? ?? [])
+              .map((row) => Map<String, dynamic>.from(row as Map))
+              .toList();
+          final breakdown = calculateRewardBreakdown(
+            amount: amount,
+            totalRewards: rewards,
+            baseCaps: baseCaps,
+          );
+          rewardsBase = breakdown.baseRewards;
+          rewardsExtra = breakdown.extraRewards;
+
+          rewardsName = await _resolveRewardsNameForTransaction(
+            service: service,
+            transactionId: transactionId,
+            accountId: parsedAccountId,
+            baseCaps: baseCaps,
+          );
+        }
+      }
+
+      transactions.add(TransactionModel(
+        id: transactionId,
+        date: rowMap['date']?.toString() ?? '',
+        time: '',
+        description: description,
+        amount: amount,
+        charges: 0,
+        rewards: rewards,
+        rewardsBase: rewardsBase,
+        rewardsExtra: rewardsExtra,
+        rewardsName: rewardsName,
+        type: transactionType,
+        category: categoryName,
+        subCategory: subCategoryName,
+        accountId: accountIdValue,
+        accountName: transactionType == 'transfer'
+            ? '$fromAccountName → $toAccountName'
+            : fromAccountName,
+        categoryId: categoryId,
+        subCategoryId: subCategoryId,
+        investmentAccountId: null,
+        investmentAccountName: null,
+        splitwiseDetails: splitwiseByTransaction[transactionId] ?? const [],
+        splitwiseGroupId: null,
+        splitwiseUserIds: const [],
+        includeSplitwise: false,
+        splitType: null,
+        mccCodeId: mccCodeId,
+      ));
+    }
+
+    return transactions;
+  }
+
   static Future<List<TransactionModel>> getAllTransactions(
       String month, String year, {String? accountId}) async {
     final range = _getMonthRangeTimestamps(month, year);
@@ -1067,6 +1336,14 @@ WHERE a.IS_ACTIVE = 1
         "(SELECT COALESCE(SUM(cct.REWARDS), 0) "
         "FROM CreditCardTransactions cct "
         "WHERE cct.TRANSACTION_ID = t.ID) AS rewards, "
+        "(SELECT COALESCE(SUM(CASE WHEN cccd.IS_BASE_REWARD_CAP = 1 THEN cct.REWARDS ELSE 0 END), 0) "
+        "FROM CreditCardTransactions cct "
+        "LEFT JOIN CreditCardCapDetails cccd ON cccd.ID = cct.CAP_ID "
+        "WHERE cct.TRANSACTION_ID = t.ID) AS rewards_base, "
+        "(SELECT COALESCE(SUM(CASE WHEN cccd.IS_BASE_REWARD_CAP = 0 THEN cct.REWARDS ELSE 0 END), 0) "
+        "FROM CreditCardTransactions cct "
+        "LEFT JOIN CreditCardCapDetails cccd ON cccd.ID = cct.CAP_ID "
+        "WHERE cct.TRANSACTION_ID = t.ID) AS rewards_extra, "
         "(SELECT COALESCE(cct.MCC_ID, NULL) "
         "FROM CreditCardTransactions cct "
         "WHERE cct.TRANSACTION_ID = t.ID LIMIT 1) AS mccCodeId, "
@@ -1137,7 +1414,8 @@ WHERE a.IS_ACTIVE = 1
       }
     }
 
-    return rows.map((row) {
+    final transactions = <TransactionModel>[];
+    for (final row in rows) {
       final rowMap = Map<String, dynamic>.from(row as Map);
       final transactionId = rowMap['id']?.toString() ?? '';
       final type = _mapTransactionType(rowMap['transaction_type']);
@@ -1153,12 +1431,56 @@ WHERE a.IS_ACTIVE = 1
           .cast<String>()
           .toList();
 
-      return TransactionModel.fromJson({
+      final accountIdValue = (isIncome
+              ? rowMap['to_account_id']
+              : rowMap['from_account_id'])
+          ?.toString();
+      final amount = _toDouble(rowMap['amount']);
+      final rewards = _toDouble(rowMap['rewards']);
+      String rewardsName = '';
+
+      double rewardsBase = 0;
+      double rewardsExtra = rewards;
+
+      if (type == 'expense' && accountIdValue != null && accountIdValue.isNotEmpty) {
+        final parsedAccountId = int.tryParse(accountIdValue);
+        if (parsedAccountId != null) {
+          final baseCapQuery = "SELECT CAP_PERCENTAGE, REWARD_PER_AMOUNT "
+              "FROM CreditCardCapDetails "
+              "WHERE CREDIT_CARD_ID = $parsedAccountId AND IS_BASE_REWARD_CAP = 1";
+          final config = MySqlConfig.fromDotEnv();
+          final service = MySqlService();
+          await service.connect(config);
+          final baseCapResult = await service.executeReadQuery(baseCapQuery);
+          final baseCaps = (baseCapResult['rows'] as List? ?? [])
+              .map((row) => Map<String, dynamic>.from(row as Map))
+              .toList();
+          final breakdown = calculateRewardBreakdown(
+            amount: amount,
+            totalRewards: rewards,
+            baseCaps: baseCaps,
+          );
+          rewardsBase = breakdown.baseRewards;
+          rewardsExtra = breakdown.extraRewards;
+
+          rewardsName = await _resolveRewardsNameForTransaction(
+            service: service,
+            transactionId: transactionId,
+            accountId: parsedAccountId,
+            baseCaps: baseCaps,
+          );
+        }
+      }
+
+      transactions.add(TransactionModel.fromJson({
         'id': rowMap['id'],
         'date': rowMap['date'],
         'description': rowMap['description'] ?? '',
         'amount': rowMap['amount'],
         'rewards': rowMap['rewards'],
+        'rewardsBase': rewardsBase,
+        'rewardsExtra': rewardsExtra,
+        'rewardsName': rewardsName,
         'type': type,
         'category': isTransfer
             ? 'Transfer'
@@ -1167,10 +1489,7 @@ WHERE a.IS_ACTIVE = 1
         'subCategory': isTransfer
             ? rowMap['to_account_name']
             : rowMap['sub_category_name'],
-        'accountId': (isIncome
-                ? rowMap['to_account_id']
-                : rowMap['from_account_id'])
-            ?.toString(),
+        'accountId': accountIdValue,
         'accountName':
             isIncome ? rowMap['to_account_name'] : rowMap['from_account_name'],
         'categoryId': rowMap['category_id']?.toString(),
@@ -1191,8 +1510,10 @@ WHERE a.IS_ACTIVE = 1
             .toList(),
         'splitwiseUserIds': splitwiseUserIds,
         'includeSplitwise': splitwiseDetails.isNotEmpty,
-      });
-    }).toList();
+      }));
+    }
+
+    return transactions;
   }
 
   static Future<Map<String, dynamic>> getMonthlyExpenses(

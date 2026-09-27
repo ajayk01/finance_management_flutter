@@ -110,6 +110,9 @@ class TransactionModel {
   final double amount;
   final double charges;
   final double rewards;
+  final double rewardsBase;
+  final double rewardsExtra;
+  final String rewardsName;
   final String type;
   final String? category;
   final String? subCategory;
@@ -134,6 +137,9 @@ class TransactionModel {
     required this.amount,
     this.charges = 0,
     this.rewards = 0,
+    this.rewardsBase = 0,
+    this.rewardsExtra = 0,
+    this.rewardsName = '',
     required this.type,
     this.category,
     this.subCategory,
@@ -167,6 +173,9 @@ class TransactionModel {
         amount: _toDouble(json['amount']),
         charges: _toDouble(json['charges']),
         rewards: _toDouble(json['rewards']),
+        rewardsBase: _toDouble(json['rewardsBase']),
+        rewardsExtra: _toDouble(json['rewardsExtra']),
+        rewardsName: json['rewardsName']?.toString() ?? '',
         type: json['type'] ?? '',
         category: json['category'],
         subCategory: json['subCategory'],
