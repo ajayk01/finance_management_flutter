@@ -122,7 +122,7 @@ class SplitwiseRouteService {
         final dbAmount = _toDouble(data['TOTAL_OWNS']);
         final splitwiseAmount =
             apiFriend == null ? 0.0 : _parseFriendBalance(apiFriend);
-        if (dbAmount.abs() < 0.01 || splitwiseAmount.abs() < 0.01) 
+        if (dbAmount.abs() < 0.01 && splitwiseAmount.abs() < 0.01)
         {
           continue;
         }

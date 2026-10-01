@@ -198,7 +198,12 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
               final dbAmt = _toDouble(f['notionAmount']);
               final swAmt = _toDouble(f['splitwiseAmount']);
               final isEven = i.isEven;
-              final rowColor = isEven ? Colors.white : const Color(0xFFF9FAFB);
+                final hasMismatch = (dbAmt - swAmt).abs() >= 0.01;
+                final rowColor = hasMismatch
+                  ? const Color(0xFFFFE4E6)
+                  : isEven
+                    ? Colors.white
+                    : const Color(0xFFF9FAFB);
               return TableRow(
                 decoration: BoxDecoration(color: rowColor),
                 children: [

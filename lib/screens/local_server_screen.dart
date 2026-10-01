@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:finance_app/models/models.dart';
 import 'package:intl/intl.dart';
+import 'package:finance_app/services/app_data_cache.dart';
 import 'package:finance_app/services/direct_expense_service.dart';
 import 'package:finance_app/services/direct_sql_service.dart';
 import 'package:finance_app/services/splitwise_route_service.dart';
@@ -1416,6 +1417,9 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
         budget: budget,
       );
 
+      // Refresh the cache to pick up the new category in other screens
+      await AppDataCache().refreshCategories();
+
       _writeJson(
         response,
         {
@@ -1471,6 +1475,9 @@ class _LocalServerScreenState extends State<LocalServerScreen> {
         subCategoryName: subCategoryName,
         budget: budget,
       );
+
+      // Refresh the cache to pick up the new subcategory in other screens
+      await AppDataCache().refreshCategories();
 
       _writeJson(
         response,

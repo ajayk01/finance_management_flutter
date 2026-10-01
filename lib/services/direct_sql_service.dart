@@ -1105,6 +1105,50 @@ WHERE a.IS_ACTIVE = 1
     );
   }
 
+  static Future<({int billGenerationDate, DateTime createdDate})>
+      getCreditCardStatementInfo(
+    String creditCardId,
+  ) async {
+    final parsedCreditCardId = int.tryParse(creditCardId);
+    if (parsedCreditCardId == null) {
+      throw ArgumentError('Invalid creditCardId: $creditCardId');
+    }
+
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+    try {
+      final result = await service.executeReadQuery(
+        'SELECT BILL_GENERATION_DATE, CREATED_DATE FROM CreditCardDetails '
+        'WHERE CREDIT_CARD_ID = $parsedCreditCardId LIMIT 1',
+      );
+      final rows = result['rows'] as List? ?? const <dynamic>[];
+      final details = rows.isEmpty
+          ? null
+          : Map<String, dynamic>.from(rows.first as Map);
+      final billGenerationDate = int.tryParse(
+        details?['BILL_GENERATION_DATE']?.toString() ?? '',
+      );
+      final createdDateValue = details?['CREATED_DATE']?.toString() ?? '';
+      final createdDateEpoch = int.tryParse(createdDateValue);
+      final createdDate = createdDateEpoch == null
+          ? DateTime.tryParse(createdDateValue)
+          : DateTime.fromMillisecondsSinceEpoch(createdDateEpoch);
+      if (billGenerationDate == null ||
+          billGenerationDate < 1 ||
+          billGenerationDate > 31) {
+        throw StateError('No valid bill generation date configured for this card');
+      }
+      return (
+        billGenerationDate: billGenerationDate,
+        // Older cards may predate the CREATED_DATE column being populated.
+        createdDate: createdDate ?? DateTime(2020),
+      );
+    } finally {
+      await service.disconnect();
+    }
+  }
+
   static Future<List<TransactionModel>> getAllTransactionsAcrossAllTime({
     String? accountId,
   }) async {
@@ -1306,10 +1350,18 @@ WHERE a.IS_ACTIVE = 1
   }
 
   static Future<List<TransactionModel>> getAllTransactions(
-      String month, String year, {String? accountId}) async {
-    final range = _getMonthRangeTimestamps(month, year);
-    final fromTimestamp = range.fromTimestamp;
-    final toTimestamp = range.toTimestamp;
+    String month,
+    String year, {
+    String? accountId,
+    DateTime? fromDate,
+    DateTime? toDateExclusive,
+  }) async {
+    final monthRange = _getMonthRangeTimestamps(month, year);
+    final fromTimestamp =
+        fromDate?.millisecondsSinceEpoch ?? monthRange.fromTimestamp;
+    final toTimestamp = toDateExclusive == null
+        ? monthRange.toTimestamp
+        : toDateExclusive.millisecondsSinceEpoch - 1;
 
     int? parsedAccountId;
     if (accountId != null && accountId.trim().isNotEmpty) {
@@ -1347,6 +1399,9 @@ WHERE a.IS_ACTIVE = 1
         "(SELECT COALESCE(cct.MCC_ID, NULL) "
         "FROM CreditCardTransactions cct "
         "WHERE cct.TRANSACTION_ID = t.ID LIMIT 1) AS mccCodeId, "
+        "(SELECT cct.CAP_ID "
+        "FROM CreditCardTransactions cct "
+        "WHERE cct.TRANSACTION_ID = t.ID LIMIT 1) AS credit_card_cap_id, "
         "c.CATEGORY_NAME AS category_name, "
         "s.SUB_CATEGORY_NAME AS sub_category_name, "
         "fa.ACCOUNT_NAME AS from_account_name, "
@@ -1481,6 +1536,7 @@ WHERE a.IS_ACTIVE = 1
         'rewardsBase': rewardsBase,
         'rewardsExtra': rewardsExtra,
         'rewardsName': rewardsName,
+        'creditCardCapId': rowMap['credit_card_cap_id']?.toString(),
         'type': type,
         'category': isTransfer
             ? 'Transfer'

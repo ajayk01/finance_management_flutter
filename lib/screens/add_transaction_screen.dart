@@ -11,7 +11,12 @@ class AddTransactionScreen extends StatefulWidget {
   final bool isEdit;
   final bool fromNotification;
   final Set<String> lockFields;
-  const AddTransactionScreen({super.key, this.prefill, this.isEdit = false, this.fromNotification = false, this.lockFields = const {}});
+  const AddTransactionScreen(
+      {super.key,
+      this.prefill,
+      this.isEdit = false,
+      this.fromNotification = false,
+      this.lockFields = const {}});
 
   @override
   State<AddTransactionScreen> createState() => _AddTransactionScreenState();
@@ -25,8 +30,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   String _selectedAccount = '';
   DateTime _selectedDate = DateTime.now();
   TimeOfDay _selectedTime = TimeOfDay.now();
-  final TextEditingController _amountController = TextEditingController(text: '');
-  final TextEditingController _chargesController = TextEditingController(text: '');
+  final TextEditingController _amountController =
+      TextEditingController(text: '');
+  final TextEditingController _chargesController =
+      TextEditingController(text: '');
   final TextEditingController _descController = TextEditingController();
   double _previousCharges = 0; // Track previous charges for auto-adjustment
   bool _showSplitwise = false;
@@ -63,7 +70,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     _loadCachedFormData();
     //_loadFormData();
     _applyPrefill();
-    
+
     // Setup listener for charges to auto-adjust amount
     _chargesController.addListener(_onChargesChanged);
   }
@@ -71,23 +78,24 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   void _onChargesChanged() {
     // Only apply auto-adjustment for expense type
     if (_selectedType != 1) return;
-    
+
     final currentAmount = double.tryParse(_amountController.text) ?? 0;
     final newCharges = double.tryParse(_chargesController.text) ?? 0;
-    
+
     // Calculate net amount (what was actually paid)
     final netAmount = currentAmount + _previousCharges;
-    
+
     // Calculate new transaction amount: net - new charges
     final newAmount = netAmount - newCharges;
-    
+
     // Only update if the new amount is valid and different
     if (newAmount > 0 && (newAmount - currentAmount).abs() > 0.01) {
-      _amountController.text = newAmount == newAmount.roundToDouble() && newAmount == newAmount.truncateToDouble()
+      _amountController.text = newAmount == newAmount.roundToDouble() &&
+              newAmount == newAmount.truncateToDouble()
           ? newAmount.toStringAsFixed(0)
           : newAmount.toStringAsFixed(2);
     }
-    
+
     // Update tracked charges
     _previousCharges = newCharges;
   }
@@ -109,11 +117,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         _selectedType = 3;
         break;
     }
-    _amountController.text = tx.amount == tx.amount.roundToDouble() && tx.amount == tx.amount.truncateToDouble()
+    _amountController.text = tx.amount == tx.amount.roundToDouble() &&
+            tx.amount == tx.amount.truncateToDouble()
         ? tx.amount.toStringAsFixed(0)
         : tx.amount.toString();
     _chargesController.text = tx.charges > 0
-        ? (tx.charges == tx.charges.roundToDouble() && tx.charges == tx.charges.truncateToDouble()
+        ? (tx.charges == tx.charges.roundToDouble() &&
+                tx.charges == tx.charges.truncateToDouble()
             ? tx.charges.toStringAsFixed(0)
             : tx.charges.toString())
         : '';
@@ -145,7 +155,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     // For Investment: accountName is the from (bank) account, investmentAccountName is the to account
     if (tx.type.toLowerCase() == 'investment') {
       if (tx.accountName != null) _selectedFromAccount = tx.accountName!;
-      if (tx.investmentAccountName != null) _selectedToAccount = tx.investmentAccountName!;
+      if (tx.investmentAccountName != null)
+        _selectedToAccount = tx.investmentAccountName!;
     }
 
     // MCC Code (if credit card transaction)
@@ -159,7 +170,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _showSplitwise = true;
       final first = sw.first;
       if (first is Map) {
-        final groupId = (first['groupId'] ?? first['splitwiseGroupId'])?.toString();
+        final groupId =
+            (first['groupId'] ?? first['splitwiseGroupId'])?.toString();
         _splitType = (first['splitType'] ?? 'Equal').toString();
         if (groupId != null) {
           _pendingSplitwiseGroupId = groupId;
@@ -169,7 +181,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _pendingSplitwiseMemberIds = sw
           .where((e) => e is Map)
           .map((e) {
-            final id = (e['friendId'] ?? e['userId'] ?? e['splitwiseUserId'])?.toString();
+            final id = (e['friendId'] ?? e['userId'] ?? e['splitwiseUserId'])
+                ?.toString();
             return id;
           })
           .where((id) => id != null)
@@ -209,9 +222,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         _splitType = tx.splitType!;
       }
       if (tx.splitwiseUserIds != null && _pendingSplitwiseMemberIds.isEmpty) {
-        _pendingSplitwiseMemberIds = tx.splitwiseUserIds!
-            .map((e) => e.toString())
-            .toList();
+        _pendingSplitwiseMemberIds =
+            tx.splitwiseUserIds!.map((e) => e.toString()).toList();
       }
     }
   }
@@ -255,7 +267,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       if (invs.isNotEmpty && _selectedToAccount.isEmpty && _selectedType == 3) {
         _selectedToAccount = invs.first.name;
       }
-      if (banks.isNotEmpty && _selectedToAccount.isEmpty && _selectedType == 2 && banks.length > 1) {
+      if (banks.isNotEmpty &&
+          _selectedToAccount.isEmpty &&
+          _selectedType == 2 &&
+          banks.length > 1) {
         _selectedToAccount = banks[1].name;
       }
       if (groups.isNotEmpty && _selectedGroup.isEmpty) {
@@ -265,12 +280,16 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _syncSelectedCapWithAccount();
 
       // Resolve pending splitwise prefill
-      if ((_pendingSplitwiseGroupId != null || _pendingSplitwiseMemberIds.isNotEmpty || _pendingSplitwiseFriendNames.isNotEmpty) && groups.isNotEmpty) {
+      if ((_pendingSplitwiseGroupId != null ||
+              _pendingSplitwiseMemberIds.isNotEmpty ||
+              _pendingSplitwiseFriendNames.isNotEmpty) &&
+          groups.isNotEmpty) {
         SplitwiseGroup? matchedGroup;
 
         // Try to match by group ID first
         if (_pendingSplitwiseGroupId != null) {
-          matchedGroup = groups.where((g) => g.id == _pendingSplitwiseGroupId).firstOrNull;
+          matchedGroup =
+              groups.where((g) => g.id == _pendingSplitwiseGroupId).firstOrNull;
         }
 
         // If no group ID, find the group that contains the most matching friends
@@ -278,7 +297,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           int bestMatchCount = 0;
           for (final g in groups) {
             final matchCount = _pendingSplitwiseMemberIds
-                .where((fid) => g.members.any((m) => m.friendId == fid || m.id == fid))
+                .where((fid) =>
+                    g.members.any((m) => m.friendId == fid || m.id == fid))
                 .length;
             if (matchCount > bestMatchCount) {
               bestMatchCount = matchCount;
@@ -292,13 +312,18 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           _selectedPeople.clear();
           // Match members by friendId or member id
           for (final fid in _pendingSplitwiseMemberIds) {
-            final m = matchedGroup.members.where((m) => m.friendId == fid || m.id == fid).firstOrNull;
+            final m = matchedGroup.members
+                .where((m) => m.friendId == fid || m.id == fid)
+                .firstOrNull;
             if (m != null) _selectedPeople.add(m.name);
           }
           // If no members matched by ID, fall back to friend names
-          if (_selectedPeople.isEmpty && _pendingSplitwiseFriendNames.isNotEmpty) {
+          if (_selectedPeople.isEmpty &&
+              _pendingSplitwiseFriendNames.isNotEmpty) {
             for (final fname in _pendingSplitwiseFriendNames) {
-              final m = matchedGroup.members.where((m) => m.name == fname).firstOrNull;
+              final m = matchedGroup.members
+                  .where((m) => m.name == fname)
+                  .firstOrNull;
               if (m != null) {
                 _selectedPeople.add(m.name);
               }
@@ -307,9 +332,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
           for (final member in matchedGroup.members) {
             if (!_selectedPeople.contains(member.name)) continue;
-            final prefillAmount = _pendingSplitwiseAmountsByMemberId[member.id] ??
-                _pendingSplitwiseAmountsByMemberId[member.friendId] ??
-                _pendingSplitwiseAmountsByFriendName[member.name];
+            final prefillAmount =
+                _pendingSplitwiseAmountsByMemberId[member.id] ??
+                    _pendingSplitwiseAmountsByMemberId[member.friendId] ??
+                    _pendingSplitwiseAmountsByFriendName[member.name];
             if (prefillAmount == null || prefillAmount <= 0) continue;
             final controller = _customAmountControllers.putIfAbsent(
               member.id,
@@ -390,7 +416,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   }
 
   Future<void> _reauthenticateSplitwise() {
-    return SplitwiseSessionService.instance.ensureAuthenticated(context, force: true);
+    return SplitwiseSessionService.instance
+        .ensureAuthenticated(context, force: true);
   }
 
   List<String> get _categories {
@@ -413,7 +440,16 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       if (filtered.isNotEmpty) return filtered;
       return _apiCategories.map((c) => c.name).toList();
     }
-    return ['Shopping', 'Food & Drink', 'Subscription', 'Education', 'Transportation', 'Entertainment', 'Health', 'Others'];
+    return [
+      'Shopping',
+      'Food & Drink',
+      'Subscription',
+      'Education',
+      'Transportation',
+      'Entertainment',
+      'Health',
+      'Others'
+    ];
   }
 
   Map<String, List<String>> get _subCategories {
@@ -439,29 +475,53 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   List<String> get _accounts {
     final items = <String>[];
-    for (final b in _bankAccounts) { items.add(b.name); }
-    for (final c in _creditCards) { items.add(c.name); }
-    if (items.isEmpty) return ['Chase Bank', 'Bank of America', 'Visa ••4521', 'Mastercard ••8832'];
+    for (final b in _bankAccounts) {
+      items.add(b.name);
+    }
+    for (final c in _creditCards) {
+      items.add(c.name);
+    }
+    if (items.isEmpty)
+      return [
+        'Chase Bank',
+        'Bank of America',
+        'Visa ••4521',
+        'Mastercard ••8832'
+      ];
     return items;
   }
 
   List<String> get _bankOnlyAccounts {
     final items = <String>[];
-    for (final b in _bankAccounts) { items.add(b.name); }
-    for (final c in _creditCards) { items.add(c.name); }
+    for (final b in _bankAccounts) {
+      items.add(b.name);
+    }
+    for (final c in _creditCards) {
+      items.add(c.name);
+    }
     if (items.isEmpty) return ['Chase Bank', 'Bank of America'];
     return items;
   }
 
   List<String> get _investmentAccountNames {
     final items = <String>[];
-    for (final a in _investmentAccounts) { items.add(a.name); }
+    for (final a in _investmentAccounts) {
+      items.add(a.name);
+    }
     if (items.isEmpty) return ['Investment Account'];
     return items;
   }
 
   CreditCardAccount? get _selectedCreditCardAccount {
     return _creditCards.where((c) => c.name == _selectedAccount).firstOrNull;
+  }
+
+  String _accountIdForName(String accountName) {
+    final bank = _bankAccounts.where((b) => b.name == accountName).firstOrNull;
+    if (bank != null) return bank.id;
+
+    return _creditCards.where((c) => c.name == accountName).firstOrNull?.id ??
+        '';
   }
 
   List<CreditCardCap> get _availableCreditCardCaps {
@@ -490,8 +550,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _selectedCreditCardCapId = caps.first.id;
     }
   }
-
-
 
   List<String> get _splitGroups => _splitwiseGroups.isNotEmpty
       ? _splitwiseGroups.map((g) => g.name).toList()
@@ -533,7 +591,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   }
 
   double get _budgetPercent {
-    final card = _creditCards.where((c) => c.name == _selectedAccount).firstOrNull;
+    final card =
+        _creditCards.where((c) => c.name == _selectedAccount).firstOrNull;
     if (card != null && card.totalLimit > 0) {
       return card.usedAmount / card.totalLimit;
     }
@@ -681,16 +740,21 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         }
 
         // Splitwise for expense edit
-        if (_selectedType == 1 && _showSplitwise && _splitwiseGroups.isNotEmpty) {
-          final isCreditCard = _creditCards.any((c) => c.name == _selectedAccount);
+        if (_selectedType == 1 &&
+            _showSplitwise &&
+            _splitwiseGroups.isNotEmpty) {
+          final isCreditCard =
+              _creditCards.any((c) => c.name == _selectedAccount);
           if (isCreditCard) {
-            final card = _creditCards.firstWhere((c) => c.name == _selectedAccount);
+            final card =
+                _creditCards.firstWhere((c) => c.name == _selectedAccount);
             body['account'] = {'type': 'Credit Card', 'id': card.id};
             body['accountId'] = card.id;
           } else {
             final bank = _bankAccounts.firstWhere(
               (b) => b.name == _selectedAccount,
-              orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
+              orElse: () =>
+                  BankAccount(id: '', name: _selectedAccount, balance: 0),
             );
             body['account'] = {'type': 'Bank', 'id': bank.id};
             body['accountId'] = bank.id;
@@ -704,7 +768,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           body['splitwiseGroupId'] = group.id;
           body['splitwiseUserIds'] = _selectedPeople
               .map((name) => group.members
-                  .firstWhere((m) => m.name == name, orElse: () => group.members.first)
+                  .firstWhere((m) => m.name == name,
+                      orElse: () => group.members.first)
                   .id)
               .toList();
           body['splitType'] = _splitType.toLowerCase();
@@ -729,14 +794,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
         switch (_selectedType) {
           case 0:
-            final bank = _bankAccounts.firstWhere(
-              (b) => b.name == _selectedAccount,
-              orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
-            );
             await DirectSqlService.updateIncomeTransaction(
               transactionId: widget.prefill!.id,
               amount: amount,
-              accountId: bank.id,
+              accountId: _accountIdForName(_selectedAccount),
               categoryId: catObj.id,
               subCategoryId: subCatObj.id,
               notes: _descController.text,
@@ -744,9 +805,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             );
             break;
           case 1:
-            final isCreditCard = _creditCards.any((c) => c.name == _selectedAccount);
+            final isCreditCard =
+                _creditCards.any((c) => c.name == _selectedAccount);
             if (isCreditCard) {
-              final card = _creditCards.firstWhere((c) => c.name == _selectedAccount);
+              final card =
+                  _creditCards.firstWhere((c) => c.name == _selectedAccount);
               body['account'] = {'type': 'Credit Card', 'id': card.id};
               body['accountId'] = card.id;
               if (_selectedCreditCardCapId.trim().isNotEmpty) {
@@ -755,7 +818,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             } else {
               final bank = _bankAccounts.firstWhere(
                 (b) => b.name == _selectedAccount,
-                orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
+                orElse: () =>
+                    BankAccount(id: '', name: _selectedAccount, balance: 0),
               );
               body['account'] = {'type': 'Bank', 'id': bank.id};
               body['accountId'] = bank.id;
@@ -771,10 +835,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               categoryId: body['categoryId'] as String,
               subCategoryId: body['subCategoryId']?.toString(),
               capId: body['capId']?.toString(),
-              mccCodeId: _selectedMccCodeId.trim().isNotEmpty 
-                  ? _selectedMccCodeId 
+              mccCodeId: _selectedMccCodeId.trim().isNotEmpty
+                  ? _selectedMccCodeId
                   : null,
-              updateSplitwise: true,
+                updateSplitwise: _showSplitwise,
               includeSplitwise: body['includeSplitwise'] == true,
               splitwiseGroupId: body['splitwiseGroupId']?.toString(),
               splitwiseUserIds: (body['splitwiseUserIds'] as List?)
@@ -782,38 +846,23 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   .toList(),
               splitType: body['splitType']?.toString(),
               customAmounts: (body['customAmounts'] as Map?)?.map(
-                (key, value) => MapEntry(key.toString(), (value as num).toDouble()),
+                (key, value) =>
+                    MapEntry(key.toString(), (value as num).toDouble()),
               ),
               reauthenticateSplitwise: _reauthenticateSplitwise,
             );
             break;
           case 2:
-            final fromAccount = _bankAccounts.firstWhere(
-              (b) => b.name == _selectedFromAccount,
-              orElse: () => _creditCards.isNotEmpty
-                  ? BankAccount(id: _creditCards.firstWhere((c) => c.name == _selectedFromAccount, orElse: () => _creditCards.first).id, name: _selectedFromAccount, balance: 0)
-                  : BankAccount(id: '', name: _selectedFromAccount, balance: 0),
-            );
-            final toAccount = _bankAccounts.firstWhere(
-              (b) => b.name == _selectedToAccount,
-              orElse: () => _creditCards.isNotEmpty
-                  ? BankAccount(id: _creditCards.firstWhere((c) => c.name == _selectedToAccount, orElse: () => _creditCards.first).id, name: _selectedToAccount, balance: 0)
-                  : BankAccount(id: '', name: _selectedToAccount, balance: 0),
-            );
             await DirectSqlService.updateTransferTransaction(
               transactionId: widget.prefill!.id,
               amount: amount,
-              fromAccountId: fromAccount.id,
-              toAccountId: toAccount.id,
+              fromAccountId: _accountIdForName(_selectedFromAccount),
+              toAccountId: _accountIdForName(_selectedToAccount),
               notes: _descController.text,
               date: transactionDate,
             );
             break;
           case 3:
-            final fromBank = _bankAccounts.firstWhere(
-              (b) => b.name == _selectedFromAccount,
-              orElse: () => BankAccount(id: '', name: _selectedFromAccount, balance: 0),
-            );
             final investmentAccount = _investmentAccounts.firstWhere(
               (a) => a.name == _selectedToAccount,
               orElse: () => InvestmentAccount(id: '', name: _selectedToAccount),
@@ -821,7 +870,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             await DirectSqlService.updateInvestmentTransaction(
               transactionId: widget.prefill!.id,
               amount: amount,
-              fromAccountId: fromBank.id,
+              fromAccountId: _accountIdForName(_selectedFromAccount),
               investmentAccountId: investmentAccount.id,
               notes: _descController.text,
               date: transactionDate,
@@ -840,13 +889,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       // ── Create mode (existing logic) ──
       switch (_selectedType) {
         case 0: // Income
-          final bank = _bankAccounts.firstWhere(
-            (b) => b.name == _selectedAccount,
-            orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
-          );
           await DirectSqlService.addIncomeTransaction(
             amount: amount,
-            accountId: bank.id,
+            accountId: _accountIdForName(_selectedAccount),
             categoryId: catObj.id,
             subCategoryId: subCatObj.id,
             notes: _descController.text,
@@ -854,15 +899,18 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           );
           break;
         case 1: // Expense
-          final isCreditCard = _creditCards.any((c) => c.name == _selectedAccount);
+          final isCreditCard =
+              _creditCards.any((c) => c.name == _selectedAccount);
           Map<String, dynamic> account;
           if (isCreditCard) {
-            final card = _creditCards.firstWhere((c) => c.name == _selectedAccount);
+            final card =
+                _creditCards.firstWhere((c) => c.name == _selectedAccount);
             account = {'type': 'Credit Card', 'id': card.id};
           } else {
             final bank = _bankAccounts.firstWhere(
               (b) => b.name == _selectedAccount,
-              orElse: () => BankAccount(id: '', name: _selectedAccount, balance: 0),
+              orElse: () =>
+                  BankAccount(id: '', name: _selectedAccount, balance: 0),
             );
             account = {'type': 'Bank', 'id': bank.id};
           }
@@ -896,15 +944,20 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 : null,
             includeSplitwise: _showSplitwise,
             splitwiseGroupId: _showSplitwise && _splitwiseGroups.isNotEmpty
-                ? _splitwiseGroups.firstWhere((g) => g.name == _selectedGroup, orElse: () => _splitwiseGroups.first).id
+                ? _splitwiseGroups
+                    .firstWhere((g) => g.name == _selectedGroup,
+                        orElse: () => _splitwiseGroups.first)
+                    .id
                 : null,
             splitwiseUserIds: splitUserIds,
             splitType: _showSplitwise ? _splitType.toLowerCase() : null,
             customAmounts: _showSplitwise && _splitType == 'Custom'
                 ? () {
                     final m = <String, double>{};
-                    final selectedMembers = (_selectedSplitwiseGroup?.members ?? const <SplitwiseMember>[])
-                        .where((member) => _selectedPeople.contains(member.name))
+                    final selectedMembers = (_selectedSplitwiseGroup?.members ??
+                            const <SplitwiseMember>[])
+                        .where(
+                            (member) => _selectedPeople.contains(member.name))
                         .toList();
                     for (final member in selectedMembers) {
                       final val = double.tryParse(
@@ -915,44 +968,27 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     return m.isNotEmpty ? m : null;
                   }()
                 : null,
-            reauthenticateSplitwise: _showSplitwise
-                ? _reauthenticateSplitwise
-                : null,
+            reauthenticateSplitwise:
+                _showSplitwise ? _reauthenticateSplitwise : null,
           );
           break;
         case 2: // Transfer
-          final fromAccount = _bankAccounts.firstWhere(
-            (b) => b.name == _selectedFromAccount,
-            orElse: () => _creditCards.isNotEmpty
-                ? BankAccount(id: _creditCards.firstWhere((c) => c.name == _selectedFromAccount, orElse: () => _creditCards.first).id, name: _selectedFromAccount, balance: 0)
-                : BankAccount(id: '', name: _selectedFromAccount, balance: 0),
-          );
-          final toAccount = _bankAccounts.firstWhere(
-            (b) => b.name == _selectedToAccount,
-            orElse: () => _creditCards.isNotEmpty
-                ? BankAccount(id: _creditCards.firstWhere((c) => c.name == _selectedToAccount, orElse: () => _creditCards.first).id, name: _selectedToAccount, balance: 0)
-                : BankAccount(id: '', name: _selectedToAccount, balance: 0),
-          );
           await DirectSqlService.addTransferTransaction(
             amount: amount,
-            fromAccountId: fromAccount.id,
-            toAccountId: toAccount.id,
+            fromAccountId: _accountIdForName(_selectedFromAccount),
+            toAccountId: _accountIdForName(_selectedToAccount),
             notes: _descController.text,
             date: transactionDate,
           );
           break;
         case 3: // Investment
-          final fromBank = _bankAccounts.firstWhere(
-            (b) => b.name == _selectedFromAccount,
-            orElse: () => BankAccount(id: '', name: _selectedFromAccount, balance: 0),
-          );
           final inv = _investmentAccounts.firstWhere(
             (a) => a.name == _selectedToAccount,
             orElse: () => InvestmentAccount(id: '', name: _selectedToAccount),
           );
           await DirectSqlService.addInvestmentTransaction(
             amount: amount,
-            fromAccountId: fromBank.id,
+            fromAccountId: _accountIdForName(_selectedFromAccount),
             investmentAccountId: inv.id,
             notes: _descController.text,
             date: transactionDate,
@@ -1006,8 +1042,18 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   String get _formattedDate {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${_selectedDate.day} ${months[_selectedDate.month - 1]} ${_selectedDate.year}';
   }
@@ -1043,7 +1089,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             onPressed: () => Navigator.pop(context),
           ),
           title: Text(widget.isEdit ? 'Update Transaction' : 'Add Transaction',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF1E293B))),
+              style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1E293B))),
           centerTitle: true,
         ),
         body: const Center(child: CircularProgressIndicator()),
@@ -1073,259 +1122,285 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           SingleChildScrollView(
             padding: const EdgeInsets.all(20),
             child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Type Selector ──
-              _buildTypeTabs(),
-              const SizedBox(height: 24),
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Type Selector ──
+                  _buildTypeTabs(),
+                  const SizedBox(height: 24),
 
-              // ── Budget Alert ──
-              if (_selectedType == 1) ...[
-                _buildBudgetAlert(),
-                const SizedBox(height: 16),
-              ],
-
-              // ── Amount ──
-              _buildTextField(
-                label: 'Amount',
-                controller: _amountController,
-                hint: '0',
-                icon: Icons.currency_rupee_outlined,
-                keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
-                prefix: '₹ ',
-                readOnly: widget.fromNotification ||
-                  widget.lockFields.contains('amount') ||
-                  (widget.isEdit && _selectedType == 1),
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'^-?\d*\.?\d*')),
-                ],
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Enter amount';
-                  final parsed = double.tryParse(v.trim());
-                  if (parsed == null) return 'Enter a valid amount';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
-              // ── Charges (Expense only, enabled in edit mode) ──
-              if (_selectedType == 1) ...[
-                _buildTextField(
-                  label: 'Charges',
-                  controller: _chargesController,
-                  hint: '0',
-                  icon: Icons.discount_outlined,
-                  keyboardType: const TextInputType.numberWithOptions(signed: false, decimal: true),
-                  prefix: '₹ ',
-                  readOnly: widget.fromNotification,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+                  // ── Budget Alert ──
+                  if (_selectedType == 1) ...[
+                    _buildBudgetAlert(),
+                    const SizedBox(height: 16),
                   ],
-                  validator: (v) {
-                    if (v != null && v.trim().isNotEmpty) {
+
+                  // ── Amount ──
+                  _buildTextField(
+                    label: 'Amount',
+                    controller: _amountController,
+                    hint: '0',
+                    icon: Icons.currency_rupee_outlined,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        signed: true, decimal: true),
+                    prefix: '₹ ',
+                    readOnly: widget.fromNotification ||
+                        widget.lockFields.contains('amount') ||
+                        (widget.isEdit && _selectedType == 1),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                          RegExp(r'^-?\d*\.?\d*')),
+                    ],
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'Enter amount';
                       final parsed = double.tryParse(v.trim());
-                      if (parsed == null) return 'Enter a valid charges amount';
-                      if (parsed < 0) return 'Charges cannot be negative';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 8),
-                // ── Net Amount Display ──
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Builder(
-                    builder: (context) {
-                      final amount = double.tryParse(_amountController.text) ?? 0;
-                      final charges = double.tryParse(_chargesController.text) ?? 0;
-                      final netAmount = amount + charges;
-                      return Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Net Amount',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                          Text(
-                            '₹${netAmount.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: netAmount >= 0 ? const Color(0xFF5BC5A7) : const Color(0xFFEF4444),
-                            ),
-                          ),
-                        ],
-                      );
+                      if (parsed == null) return 'Enter a valid amount';
+                      return null;
                     },
                   ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // ── Date & Time ──
-              _buildDateTimeField(),
-              const SizedBox(height: 16),
-
-              // ── Account / From-To Accounts ──
-              if (_selectedType == 2 || _selectedType == 3) ...[
-                // From Account
-                _buildTappableField(
-                  label: 'From Account',
-                  value: _selectedFromAccount,
-                  icon: Icons.account_balance_outlined,
-                  onTap: widget.fromNotification || widget.lockFields.contains('account')
-                      ? null
-                      : () => _showFromAccountPicker(),
-                  errorText: _fromAccountError,
-                ),
-                const SizedBox(height: 16),
-                // To Account
-                _buildTappableField(
-                  label: 'To Account',
-                  value: _selectedToAccount,
-                  icon: _selectedType == 3 ? Icons.trending_up : Icons.account_balance_outlined,
-                  onTap: widget.lockFields.contains('account') ? null : () => _showToAccountPicker(),
-                  errorText: _toAccountError,
-                ),
-                const SizedBox(height: 16),
-              ] else ...[
-                _buildTappableField(
-                  label: 'Account',
-                  value: _selectedAccount,
-                  icon: _isCreditCard
-                      ? Icons.credit_card
-                      : Icons.account_balance_outlined,
-                  onTap: widget.fromNotification || widget.lockFields.contains('account')
-                      ? null
-                      : () => _showAccountPicker(),
-                  errorText: _accountError,
-                ),
-                const SizedBox(height: 16),
-
-                // ── Credit Cap ──
-                if (_isCreditCard) ...[
-                  _buildCreditCardCapField(),
                   const SizedBox(height: 16),
-                  // ── MCC Code ──
-                  _buildMccCodeField(),
+
+                  // ── Charges (Expense only, enabled in edit mode) ──
+                  if (_selectedType == 1) ...[
+                    _buildTextField(
+                      label: 'Charges',
+                      controller: _chargesController,
+                      hint: '0',
+                      icon: Icons.discount_outlined,
+                      keyboardType: const TextInputType.numberWithOptions(
+                          signed: false, decimal: true),
+                      prefix: '₹ ',
+                      readOnly: widget.fromNotification,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                            RegExp(r'^\d*\.?\d*')),
+                      ],
+                      validator: (v) {
+                        if (v != null && v.trim().isNotEmpty) {
+                          final parsed = double.tryParse(v.trim());
+                          if (parsed == null)
+                            return 'Enter a valid charges amount';
+                          if (parsed < 0) return 'Charges cannot be negative';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    // ── Net Amount Display ──
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      child: Builder(
+                        builder: (context) {
+                          final amount =
+                              double.tryParse(_amountController.text) ?? 0;
+                          final charges =
+                              double.tryParse(_chargesController.text) ?? 0;
+                          final netAmount = amount + charges;
+                          return Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Net Amount',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                              Text(
+                                '₹${netAmount.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: netAmount >= 0
+                                      ? const Color(0xFF5BC5A7)
+                                      : const Color(0xFFEF4444),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // ── Date & Time ──
+                  _buildDateTimeField(),
                   const SizedBox(height: 16),
-                ],
 
-                // ── Category & Sub Category ──
-                _buildCategoryRow(),
-                const SizedBox(height: 16),
-              ],
+                  // ── Account / From-To Accounts ──
+                  if (_selectedType == 2 || _selectedType == 3) ...[
+                    // From Account
+                    _buildTappableField(
+                      label: 'From Account',
+                      value: _selectedFromAccount,
+                      icon: Icons.account_balance_outlined,
+                      onTap: widget.fromNotification ||
+                              widget.lockFields.contains('account')
+                          ? null
+                          : () => _showFromAccountPicker(),
+                      errorText: _fromAccountError,
+                    ),
+                    const SizedBox(height: 16),
+                    // To Account
+                    _buildTappableField(
+                      label: 'To Account',
+                      value: _selectedToAccount,
+                      icon: _selectedType == 3
+                          ? Icons.trending_up
+                          : Icons.account_balance_outlined,
+                      onTap: widget.lockFields.contains('account')
+                          ? null
+                          : () => _showToAccountPicker(),
+                      errorText: _toAccountError,
+                    ),
+                    const SizedBox(height: 16),
+                  ] else ...[
+                    _buildTappableField(
+                      label: 'Account',
+                      value: _selectedAccount,
+                      icon: _isCreditCard
+                          ? Icons.credit_card
+                          : Icons.account_balance_outlined,
+                      onTap: widget.fromNotification ||
+                              widget.lockFields.contains('account')
+                          ? null
+                          : () => _showAccountPicker(),
+                      errorText: _accountError,
+                    ),
+                    const SizedBox(height: 16),
 
-              // ── Description ──
-              _buildTextField(
-                label: 'Description',
-                controller: _descController,
-                hint: 'Add a description...',
-                icon: Icons.notes_outlined,
-                maxLines: 2,
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Enter a description' : null,
-              ),
-
-              // ── Splitwise Toggle (edit mode) ──
-              if (widget.isEdit && _selectedType == 1) ...[
-                const SizedBox(height: 16),
-                GestureDetector(
-                  onTap: _toggleSplitwise,
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: Checkbox(
-                          value: _showSplitwise,
-                          onChanged: (_) => _toggleSplitwise(),
-                          activeColor: const Color(0xFF1E293B),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Edit Splitwise',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: Color(0xFF1E293B),
-                        ),
-                      ),
+                    // ── Credit Cap ──
+                    if (_selectedType == 1 && _isCreditCard) ...[
+                      _buildCreditCardCapField(),
+                      const SizedBox(height: 16),
+                      // ── MCC Code ──
+                      _buildMccCodeField(),
+                      const SizedBox(height: 16),
                     ],
+
+                    // ── Category & Sub Category ──
+                    _buildCategoryRow(),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // ── Description ──
+                  _buildTextField(
+                    label: 'Description',
+                    controller: _descController,
+                    hint: 'Add a description...',
+                    icon: Icons.notes_outlined,
+                    maxLines: 2,
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Enter a description'
+                        : null,
                   ),
-                ),
-              ],
 
-              // ── Splitwise Form ──
-              if (_showSplitwise && _selectedType == 1) ...[
-                const SizedBox(height: 16),
-                _buildSplitwiseForm(),
-              ],
-
-              const SizedBox(height: 32),
-
-              // ── Bottom Buttons ──
-              if (!widget.isEdit && _selectedType == 1)
-                Row(
-                  children: [
-                    Expanded(child: _buildSubmitButton()),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: SizedBox(
-                        height: 52,
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            if (!_showSplitwise) {
-                              // Validate required fields before opening Splitwise
-                              final errors = <String>[];
-                              final amount = double.tryParse(_amountController.text.trim()) ?? 0;
-                              if (amount <= 0) errors.add('Amount');
-                              if (_selectedAccount.isEmpty) errors.add('Account');
-                              if (_selectedCategory.isEmpty) errors.add('Category');
-                              if (_selectedSubCategory.isEmpty) errors.add('Sub Category');
-                              if (_descController.text.trim().isEmpty) errors.add('Description');
-                              if (errors.isNotEmpty) {
-                                _showValidationError(
-                                  'Please fill ${errors.join(", ")} before adding Splitwise',
-                                );
-                                return;
-                              }
-                            }
-                            await _toggleSplitwise();
-                          },
-                          icon: Image.asset('assets/images/splitwise_logo.png',
-                              width: 20, height: 20),
-                          label: const Text(
-                            'Splitwise',
+                  // ── Splitwise Toggle (edit mode) ──
+                  if (widget.isEdit && _selectedType == 1) ...[
+                    const SizedBox(height: 16),
+                    GestureDetector(
+                      onTap: _toggleSplitwise,
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: Checkbox(
+                              value: _showSplitwise,
+                              onChanged: (_) => _toggleSplitwise(),
+                              activeColor: const Color(0xFF1E293B),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(4)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Edit Splitwise',
                             style: TextStyle(
                               fontSize: 14,
-                              fontWeight: FontWeight.w600,
+                              fontWeight: FontWeight.w500,
                               color: Color(0xFF1E293B),
                             ),
                           ),
-                          style: OutlinedButton.styleFrom(
-                            side: BorderSide(color: Colors.grey.shade300),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                        ),
+                        ],
                       ),
                     ),
                   ],
-                )
-              else
-                _buildSubmitButton(),
-            ],
-          ),
+
+                  // ── Splitwise Form ──
+                  if (_showSplitwise && _selectedType == 1) ...[
+                    const SizedBox(height: 16),
+                    _buildSplitwiseForm(),
+                  ],
+
+                  const SizedBox(height: 32),
+
+                  // ── Bottom Buttons ──
+                  if (!widget.isEdit && _selectedType == 1)
+                    Row(
+                      children: [
+                        Expanded(child: _buildSubmitButton()),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: SizedBox(
+                            height: 52,
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                if (!_showSplitwise) {
+                                  // Validate required fields before opening Splitwise
+                                  final errors = <String>[];
+                                  final amount = double.tryParse(
+                                          _amountController.text.trim()) ??
+                                      0;
+                                  if (amount <= 0) errors.add('Amount');
+                                  if (_selectedAccount.isEmpty)
+                                    errors.add('Account');
+                                  if (_selectedCategory.isEmpty)
+                                    errors.add('Category');
+                                  if (_selectedSubCategory.isEmpty)
+                                    errors.add('Sub Category');
+                                  if (_descController.text.trim().isEmpty)
+                                    errors.add('Description');
+                                  if (errors.isNotEmpty) {
+                                    _showValidationError(
+                                      'Please fill ${errors.join(", ")} before adding Splitwise',
+                                    );
+                                    return;
+                                  }
+                                }
+                                await _toggleSplitwise();
+                              },
+                              icon: Image.asset(
+                                  'assets/images/splitwise_logo.png',
+                                  width: 20,
+                                  height: 20),
+                              label: const Text(
+                                'Splitwise',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF1E293B),
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: Colors.grey.shade300),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    _buildSubmitButton(),
+                ],
+              ),
             ),
           ),
           if (_loadingSplitwise)
@@ -1390,13 +1465,15 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   final cats = _categories;
                   if (cats.isNotEmpty) {
                     _selectedCategory = cats.first;
-                    final subs = _subCategories[_selectedCategory] ?? ['Others'];
+                    final subs =
+                        _subCategories[_selectedCategory] ?? ['Others'];
                     _selectedSubCategory = subs.first;
                   }
                 });
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
                 decoration: BoxDecoration(
                   color: selected ? Colors.black : Colors.transparent,
                   borderRadius: BorderRadius.circular(26),
@@ -1502,9 +1579,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           maxLines: maxLines,
           readOnly: readOnly,
           inputFormatters: inputFormatters,
-          style: readOnly
-              ? TextStyle(color: Colors.grey.shade500)
-              : null,
+          style: readOnly ? TextStyle(color: Colors.grey.shade500) : null,
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: TextStyle(color: Colors.grey.shade400),
@@ -1529,7 +1604,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Color(0xFF1E293B), width: 1.5),
+              borderSide:
+                  const BorderSide(color: Color(0xFF1E293B), width: 1.5),
             ),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
@@ -1560,25 +1636,25 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           onTap: locked
               ? null
               : () async {
-            FocusManager.instance.primaryFocus?.unfocus();
-            final pickedDate = await showDatePicker(
-              context: context,
-              initialDate: _selectedDate,
-              firstDate: DateTime(2020),
-              lastDate: DateTime(2030),
-            );
-            if (pickedDate != null) {
-              setState(() => _selectedDate = pickedDate);
-            }
-            if (!mounted) return;
-            final pickedTime = await showTimePicker(
-              context: context,
-              initialTime: _selectedTime,
-            );
-            if (pickedTime != null) {
-              setState(() => _selectedTime = pickedTime);
-            }
-          },
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  final pickedDate = await showDatePicker(
+                    context: context,
+                    initialDate: _selectedDate,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2030),
+                  );
+                  if (pickedDate != null) {
+                    setState(() => _selectedDate = pickedDate);
+                  }
+                  if (!mounted) return;
+                  final pickedTime = await showTimePicker(
+                    context: context,
+                    initialTime: _selectedTime,
+                  );
+                  if (pickedTime != null) {
+                    setState(() => _selectedTime = pickedTime);
+                  }
+                },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
@@ -1596,7 +1672,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w500,
-                    color: locked ? Colors.grey.shade500 : const Color(0xFF1E293B),
+                    color:
+                        locked ? Colors.grey.shade500 : const Color(0xFF1E293B),
                   ),
                 ),
                 const Spacer(),
@@ -1645,7 +1722,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               color: locked ? Colors.grey.shade100 : Colors.white,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: hasError ? const Color(0xFFEF4444) : Colors.grey.shade200,
+                color:
+                    hasError ? const Color(0xFFEF4444) : Colors.grey.shade200,
               ),
             ),
             child: Row(
@@ -1719,7 +1797,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
           ),
           child: Row(
             children: [
-              const Icon(Icons.credit_score, size: 18, color: Color(0xFFF57C00)),
+              const Icon(Icons.credit_score,
+                  size: 18, color: Color(0xFFF57C00)),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -1859,55 +1938,56 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 child: ListView(
                   shrinkWrap: true,
                   children: _accounts.map((a) {
-                final selected = _selectedAccount == a;
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? const Color(0xFF3B3BF9).withValues(alpha: 0.1)
-                          : const Color(0xFFF3F4F6),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(
-                      a.contains('••')
-                          ? Icons.credit_card
-                          : Icons.account_balance_outlined,
-                      size: 20,
-                      color: selected
-                          ? const Color(0xFF3B3BF9)
-                          : Colors.grey.shade600,
-                    ),
-                  ),
-                  title: Text(
-                    a,
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                      color: selected
-                          ? const Color(0xFF3B3BF9)
-                          : const Color(0xFF1E293B),
-                    ),
-                  ),
-                  trailing: selected
-                      ? const Icon(Icons.check_circle,
-                          color: Color(0xFF3B3BF9), size: 22)
-                      : Icon(Icons.circle_outlined,
-                          color: Colors.grey.shade300, size: 22),
-                  onTap: () {
-                    setState(() {
-                      _selectedAccount = a;
-                      _accountError = null;
-                      _syncSelectedCapWithAccount();
-                    });
-                    Navigator.pop(ctx);
-                  },
-                );
-              }).toList(),
+                    final selected = _selectedAccount == a;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? const Color(0xFF3B3BF9).withValues(alpha: 0.1)
+                              : const Color(0xFFF3F4F6),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          a.contains('••')
+                              ? Icons.credit_card
+                              : Icons.account_balance_outlined,
+                          size: 20,
+                          color: selected
+                              ? const Color(0xFF3B3BF9)
+                              : Colors.grey.shade600,
+                        ),
+                      ),
+                      title: Text(
+                        a,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight:
+                              selected ? FontWeight.w600 : FontWeight.w500,
+                          color: selected
+                              ? const Color(0xFF3B3BF9)
+                              : const Color(0xFF1E293B),
+                        ),
+                      ),
+                      trailing: selected
+                          ? const Icon(Icons.check_circle,
+                              color: Color(0xFF3B3BF9), size: 22)
+                          : Icon(Icons.circle_outlined,
+                              color: Colors.grey.shade300, size: 22),
+                      onTap: () {
+                        setState(() {
+                          _selectedAccount = a;
+                          _accountError = null;
+                          _syncSelectedCapWithAccount();
+                        });
+                        Navigator.pop(ctx);
+                      },
+                    );
+                  }).toList(),
                 ),
               ),
             ],
@@ -2179,7 +2259,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   }
 
   void _showToAccountPicker() {
-    final accounts = _selectedType == 3 ? _investmentAccountNames : _bankOnlyAccounts;
+    final accounts =
+        _selectedType == 3 ? _investmentAccountNames : _bankOnlyAccounts;
     _showGenericAccountPicker(
       title: 'Select To Account',
       accounts: accounts,
@@ -2452,8 +2533,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               showModalBottomSheet(
                 context: context,
                 shape: const RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.vertical(top: Radius.circular(20)),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                 ),
                 isScrollControlled: true,
                 constraints: BoxConstraints(
@@ -2478,8 +2558,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               );
             },
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               decoration: BoxDecoration(
                 color: const Color(0xFFF8F8FB),
                 borderRadius: BorderRadius.circular(10),
@@ -2523,8 +2602,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               showModalBottomSheet(
                 context: context,
                 shape: const RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.vertical(top: Radius.circular(20)),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                 ),
                 isScrollControlled: true,
                 constraints: BoxConstraints(
@@ -2535,8 +2613,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             },
             child: Container(
               width: double.infinity,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 color: const Color(0xFFF8F8FB),
                 borderRadius: BorderRadius.circular(10),
@@ -2584,7 +2661,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                                           .where((m) => m.name == p)
                                           .firstOrNull;
                                       if (member != null) {
-                                        _customAmountControllers.remove(member.id)
+                                        _customAmountControllers
+                                            .remove(member.id)
                                             ?.dispose();
                                       }
                                     }
@@ -2640,13 +2718,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            type == 'Equal'
-                                ? Icons.drag_handle
-                                : Icons.tune,
+                            type == 'Equal' ? Icons.drag_handle : Icons.tune,
                             size: 16,
-                            color: selected
-                                ? Colors.white
-                                : Colors.grey.shade600,
+                            color:
+                                selected ? Colors.white : Colors.grey.shade600,
                           ),
                           const SizedBox(width: 6),
                           Text(
@@ -2993,7 +3068,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                         final group = _selectedSplitwiseGroup;
                         if (group != null) {
                           for (final member in group.members) {
-                            _customAmountControllers.remove(member.id)
+                            _customAmountControllers
+                                .remove(member.id)
                                 ?.dispose();
                           }
                         }
@@ -3028,17 +3104,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                         person,
                         style: TextStyle(
                           fontSize: 14,
-                          fontWeight:
-                              isSel ? FontWeight.w600 : FontWeight.w500,
+                          fontWeight: isSel ? FontWeight.w600 : FontWeight.w500,
                           color: isSel
                               ? const Color(0xFF5BC5A7)
                               : const Color(0xFF1E293B),
                         ),
                       ),
                       trailing: Icon(
-                        isSel
-                            ? Icons.check_box
-                            : Icons.check_box_outline_blank,
+                        isSel ? Icons.check_box : Icons.check_box_outline_blank,
                         color: isSel
                             ? const Color(0xFF5BC5A7)
                             : Colors.grey.shade300,
@@ -3054,7 +3127,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                                   .where((m) => m.name == person)
                                   .firstOrNull;
                               if (member != null) {
-                                _customAmountControllers.remove(member.id)
+                                _customAmountControllers
+                                    .remove(member.id)
                                     ?.dispose();
                               }
                             }

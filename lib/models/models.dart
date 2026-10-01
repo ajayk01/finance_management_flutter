@@ -128,6 +128,7 @@ class TransactionModel {
   final bool includeSplitwise;
   final String? splitType;
   final String? mccCodeId;
+  final String? creditCardCapId;
 
   TransactionModel({
     required this.id,
@@ -155,6 +156,7 @@ class TransactionModel {
     this.includeSplitwise = false,
     this.splitType,
     this.mccCodeId,
+    this.creditCardCapId,
   });
 
   factory TransactionModel.fromJson(Map<String, dynamic> json) {
@@ -191,6 +193,7 @@ class TransactionModel {
         includeSplitwise: json['includeSplitwise'] == true,
         splitType: json['splitType']?.toString(),
         mccCodeId: json['mccCodeId']?.toString(),
+        creditCardCapId: json['creditCardCapId']?.toString(),
       );
   }
 

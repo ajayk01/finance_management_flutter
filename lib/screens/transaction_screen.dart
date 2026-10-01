@@ -102,6 +102,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
   double _totalIncome = 0;
   double _totalExpense = 0;
   double _totalInvestment = 0;
+  CreditCardAccount? _statementCard;
+  DateTime? _statementStartDate;
+  DateTime? _statementEndDate;
+  double? _statementTotalUsed;
 
   @override
   void initState() {
@@ -495,6 +499,112 @@ class _TransactionScreenState extends State<TransactionScreen> {
         _currentDate.year,
         _currentDate.month + offset,
       );
+      _statementCard = null;
+      _statementStartDate = null;
+      _statementEndDate = null;
+      _statementTotalUsed = null;
+    });
+    _loadTransactions();
+  }
+
+  Future<void> _showStatementTransactions(
+    CreditCardAccount card,
+    DateTime statementMonth,
+  ) async {
+    setState(() => _loading = true);
+    try {
+      final statementInfo =
+          await DirectSqlService.getCreditCardStatementInfo(card.id);
+      final billGenerationDate = statementInfo.billGenerationDate;
+      final statementEndDate = DateTime(
+        statementMonth.year,
+        statementMonth.month,
+        billGenerationDate,
+      );
+      final statementStartDate = DateTime(
+        statementMonth.year,
+        statementMonth.month - 1,
+        billGenerationDate + 1,
+      );
+      final results = await Future.wait([
+        DirectSqlService.getAllTransactions(
+          DateFormat('MMM').format(statementMonth).toLowerCase(),
+          statementMonth.year.toString(),
+          accountId: card.id,
+          fromDate: statementStartDate,
+          toDateExclusive: statementEndDate.add(const Duration(days: 1)),
+        ),
+        DirectSqlService.getAllCreditCardCaps(
+          creditCardId: card.id,
+          referenceDate: statementEndDate,
+        ),
+      ]);
+      final transactions = results[0] as List<TransactionModel>;
+      final statementCaps = results[1] as List<CreditCardCap>;
+      if (!mounted) return;
+      setState(() {
+        _transactions = transactions;
+        _creditCardCaps = statementCaps;
+        _selectedFilter = 'All';
+        _statementCard = card;
+        _statementStartDate = statementStartDate;
+        _statementEndDate = statementEndDate;
+        _statementTotalUsed = transactions.fold<double>(
+          0,
+          (total, transaction) => total + transaction.amount.abs(),
+        );
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to load statement: $error')),
+      );
+    }
+  }
+
+  Future<void> _selectStatementMonth(CreditCardAccount card) async {
+    try {
+      final statementInfo =
+          await DirectSqlService.getCreditCardStatementInfo(card.id);
+      if (!mounted) return;
+      final createdMonth = DateTime(
+        statementInfo.createdDate.year,
+        statementInfo.createdDate.month,
+      );
+      final currentMonth = DateTime(DateTime.now().year, DateTime.now().month);
+      final selectedMonth = await showDatePicker(
+        context: context,
+        initialDate: _currentDate.isBefore(createdMonth)
+            ? createdMonth
+            : _currentDate.isAfter(currentMonth)
+                ? currentMonth
+                : _currentDate,
+        firstDate: createdMonth,
+        lastDate: currentMonth,
+        initialDatePickerMode: DatePickerMode.year,
+        helpText: 'Select statement month',
+      );
+      if (selectedMonth == null || !mounted) return;
+      await _showStatementTransactions(
+        card,
+        DateTime(selectedMonth.year, selectedMonth.month),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to select statement: $error')),
+      );
+    }
+  }
+
+  void _clearStatementTransactions() {
+    setState(() {
+      _statementCard = null;
+      _statementStartDate = null;
+      _statementEndDate = null;
+      _statementTotalUsed = null;
     });
     _loadTransactions();
   }
@@ -788,18 +898,24 @@ class _TransactionScreenState extends State<TransactionScreen> {
                     builder: (context) {
                       final groups = _filteredGroups;
                       final selectedCard = _selectedCreditCard;
-                      final showSelectedCardCaps = selectedCard != null &&
+                      final statementMode = _statementCard != null;
+                        final showSelectedCardCaps = selectedCard != null &&
                           _creditCardCaps.any(
                               (cap) => cap.creditCardId == selectedCard.id);
-                      final overviewCount = _selectedFilter == 'All' ? 1 : 0;
+                      final statementHeaderCount = statementMode ? 1 : 0;
+                        final overviewCount =
+                          _selectedFilter == 'All' ? 1 : 0;
                       final capDetailsCount = showSelectedCardCaps ? 1 : 0;
                       return ListView.builder(
                         physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.symmetric(horizontal: 20),
                         itemCount:
-                            groups.length + overviewCount + capDetailsCount,
+                            groups.length + statementHeaderCount + overviewCount + capDetailsCount,
                         itemBuilder: (context, index) {
-                          if (overviewCount == 1 && index == 0) {
+                          if (statementHeaderCount == 1 && index == 0) {
+                            return _buildStatementHeader();
+                          }
+                          if (overviewCount == 1 && index == statementHeaderCount) {
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 20),
                               child: selectedCard == null
@@ -807,11 +923,12 @@ class _TransactionScreenState extends State<TransactionScreen> {
                                   : _buildCreditCardOverview(selectedCard),
                             );
                           }
-                          if (capDetailsCount == 1 && index == overviewCount) {
+                          if (capDetailsCount == 1 &&
+                              index == statementHeaderCount + overviewCount) {
                             return _buildSelectedCreditCardCaps(selectedCard!);
                           }
                           final groupIndex =
-                              index - overviewCount - capDetailsCount;
+                              index - statementHeaderCount - overviewCount - capDetailsCount;
                           return _buildDayGroupWidget(groups[groupIndex]);
                         },
                       );
@@ -839,28 +956,69 @@ class _TransactionScreenState extends State<TransactionScreen> {
     );
   }
 
+  Widget _buildStatementHeader() {
+    final card = _statementCard!;
+    final startDate = _statementStartDate!;
+    final endDate = _statementEndDate!;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEFF6FF),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.receipt_long_outlined, color: Color(0xFF2563EB)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${card.name} Statement',
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                  Text(
+                    '${DateFormat('d MMM yyyy').format(startDate)} - ${DateFormat('d MMM yyyy').format(endDate)}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Return to monthly transactions',
+              onPressed: _clearStatementTransactions,
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildCreditCardOverview(CreditCardAccount card) {
+    final statementMode = _statementCard?.id == card.id;
     final totalLimit = card.totalLimit;
-    final cardCaps = _creditCardCaps
-      .where((cap) => cap.creditCardId == card.id)
-      .toList();
-    final totalUsed = card.usedAmount.abs();
+    final cardTransactions = _transactions.where(
+      (transaction) => statementMode || transaction.accountId == card.id,
+    );
+    final totalUsed = statementMode
+      ? _statementTotalUsed ?? 0
+      : card.usedAmount.abs();
     final availableCredit =
       (totalLimit - totalUsed).clamp(0, double.infinity).toDouble();
-    final totalRewards = cardCaps.fold<double>(
+    final cycleTotalRewards = cardTransactions.fold<double>(
       0,
-      (total, cap) => total + cap.totalRewards,
+      (total, transaction) => total + transaction.rewards,
     );
-    final currentMonthTotalRewards = cardCaps.fold<double>(
+    final currentMonthBaseRewards = cardTransactions.fold<double>(
       0,
-      (total, cap) => total + cap.capCurrentAmount,
+      (total, transaction) => total + transaction.rewardsBase,
     );
-    final currentMonthBaseRewards = cardCaps
-        .where((cap) => cap.isBaseRewardCap)
-        .fold<double>(0, (total, cap) => total + cap.capCurrentAmount);
-    final currentMonthMultiplierRewards = cardCaps
-        .where((cap) => !cap.isBaseRewardCap)
-        .fold<double>(0, (total, cap) => total + cap.capCurrentAmount);
+    final currentMonthMultiplierRewards = cardTransactions.fold<double>(
+      0,
+      (total, transaction) => total + transaction.rewardsExtra,
+    );
 
     return Container(
       width: double.infinity,
@@ -900,6 +1058,26 @@ class _TransactionScreenState extends State<TransactionScreen> {
                   ],
                 ),
               ),
+              PopupMenuButton<String>(
+                tooltip: 'Credit card options',
+                onSelected: (value) {
+                  if (value == 'statement') {
+                    _selectStatementMonth(card);
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
+                    value: 'statement',
+                    child: Row(
+                      children: [
+                        Icon(Icons.receipt_long_outlined, size: 18),
+                        SizedBox(width: 8),
+                        Text('View Statement Transactions'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 18),
@@ -912,30 +1090,37 @@ class _TransactionScreenState extends State<TransactionScreen> {
                 children: [
                   _buildCreditCardMetric('Total limit', totalLimit,
                       const Color(0xFF1E293B), itemWidth),
-                  _buildCreditCardMetric('Available', availableCredit,
+                  _buildCreditCardMetric(
+                      statementMode ? 'Statement available' : 'Available',
+                      availableCredit,
                       const Color(0xFF16A34A), itemWidth),
-                    _buildCreditCardMetric('Total rewards', totalRewards,
-                      const Color(0xFF7C3AED), itemWidth,
-                      isCurrency: false),
                     _buildCreditCardMetric(
-                      'Current month total rewards',
-                      currentMonthTotalRewards,
+                      statementMode
+                          ? 'Statement total rewards'
+                          : 'Current month total rewards',
+                      cycleTotalRewards,
                       const Color(0xFF2563EB),
                       itemWidth,
                       isCurrency: false),
                     _buildCreditCardMetric(
-                      'Current month base rewards',
+                      statementMode
+                          ? 'Statement base rewards'
+                          : 'Current month base rewards',
                       currentMonthBaseRewards,
                       const Color(0xFF16A34A),
                       itemWidth,
                       isCurrency: false),
                     _buildCreditCardMetric(
-                      'Current month multiplier rewards',
+                      statementMode
+                          ? 'Statement multiplier rewards'
+                          : 'Current month multiplier rewards',
                       currentMonthMultiplierRewards,
                       const Color(0xFFF59E0B),
                       itemWidth,
                       isCurrency: false),
-                  _buildCreditCardMetric('Total used', totalUsed,
+                    _buildCreditCardMetric(
+                      statementMode ? 'Statement spend' : 'Total used',
+                      totalUsed,
                       const Color(0xFF0F766E), itemWidth),
                 ],
               );
@@ -983,6 +1168,35 @@ class _TransactionScreenState extends State<TransactionScreen> {
     final caps =
         _creditCardCaps.where((cap) => cap.creditCardId == card.id).toList();
     if (caps.isEmpty) return const SizedBox.shrink();
+    final cardTransactions = _transactions.where(
+      (transaction) => _statementCard?.id == card.id || transaction.accountId == card.id,
+    );
+    final transactionBasedCaps = caps.map((cap) {
+      final capTransactions = cardTransactions
+          .where((transaction) => transaction.creditCardCapId == cap.id);
+      final rewards = capTransactions.fold<double>(
+        0,
+        (total, transaction) => total + transaction.rewards,
+      );
+      final spend = capTransactions.fold<double>(
+        0,
+        (total, transaction) => total + transaction.amount.abs(),
+      );
+      return CreditCardCap(
+        id: cap.id,
+        creditCardId: cap.creditCardId,
+        capName: cap.capName,
+        capTotalAmount: cap.capTotalAmount,
+        capPercentage: cap.capPercentage,
+        capCurrentAmount: rewards,
+        capCurrentSpend: spend,
+        cardCurrentSpend: cap.cardCurrentSpend,
+        remainingAmount: cap.capTotalAmount - rewards,
+        totalRewards: cap.totalRewards,
+        rewardPerAmount: cap.rewardPerAmount,
+        isBaseRewardCap: cap.isBaseRewardCap,
+      );
+    }).toList();
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: Column(
@@ -992,7 +1206,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
               style:
                   const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
           const SizedBox(height: 10),
-          CreditCardCapCarousel(caps: caps),
+          CreditCardCapCarousel(caps: transactionBasedCaps),
         ],
       ),
     );
@@ -1265,6 +1479,18 @@ class _TransactionScreenState extends State<TransactionScreen> {
                     color: Colors.grey.shade500,
                   ),
                 ),
+                if (_statementCard != null &&
+                    (t.model?.rewards ?? 0) > 0) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    '${t.model!.rewards.toStringAsFixed(0)} reward points${t.model!.rewardsName.isEmpty ? '' : ' (${t.model!.rewardsName})'}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF7C3AED),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1543,5 +1769,134 @@ class _TransactionScreenState extends State<TransactionScreen> {
     final year = _currentDate.year.toString();
     AppDataCache().invalidateTransactionCache(month, year);
     await _loadTransactions();
+  }
+}
+
+class CreditCardStatementTransactionsScreen extends StatefulWidget {
+  const CreditCardStatementTransactionsScreen({
+    super.key,
+    required this.card,
+    required this.referenceDate,
+  });
+
+  final CreditCardAccount card;
+  final DateTime referenceDate;
+
+  @override
+  State<CreditCardStatementTransactionsScreen> createState() =>
+      _CreditCardStatementTransactionsScreenState();
+}
+
+class _CreditCardStatementTransactionsScreenState
+    extends State<CreditCardStatementTransactionsScreen> {
+  late Future<List<TransactionModel>> _statementTransactions;
+
+  @override
+  void initState() {
+    super.initState();
+    _statementTransactions = _loadStatementTransactions();
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _statementTransactions = _loadStatementTransactions();
+    });
+    await _statementTransactions;
+  }
+
+  Future<List<TransactionModel>> _loadStatementTransactions() {
+    return DirectSqlService.getAllTransactions(
+      DateFormat('MMM').format(widget.referenceDate).toLowerCase(),
+      widget.referenceDate.year.toString(),
+      accountId: widget.card.id,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('${widget.card.name} Statement')),
+      body: FutureBuilder<List<TransactionModel>>(
+        future: _statementTransactions,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text('Unable to load statement: ${snapshot.error}'),
+              ),
+            );
+          }
+
+          final transactions = snapshot.data ?? const <TransactionModel>[];
+          if (transactions.isEmpty) {
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: const [
+                  SizedBox(height: 240),
+                  Center(child: Text('No transactions in this statement period')),
+                ],
+              ),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: transactions.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, index) =>
+                  _buildStatementTransaction(transactions[index]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildStatementTransaction(TransactionModel transaction) {
+    final hasRewards = transaction.rewards > 0;
+    final rewardLabel = transaction.rewardsName.isEmpty
+        ? '${transaction.rewards.toStringAsFixed(0)} reward points'
+        : '${transaction.rewards.toStringAsFixed(0)} reward points (${transaction.rewardsName})';
+
+    return Card(
+      child: ListTile(
+        leading: const CircleAvatar(
+          child: Icon(Icons.credit_card_outlined),
+        ),
+        title: Text(
+          transaction.description.isEmpty ? 'Card transaction' : transaction.description,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text([transaction.date, transaction.category ?? 'Uncategorized'].join(' - ')),
+            if (hasRewards) ...[
+              const SizedBox(height: 4),
+              Text(
+                rewardLabel,
+                style: const TextStyle(
+                  color: Color(0xFF7C3AED),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ],
+        ),
+        trailing: Text(
+          formatINR(transaction.amount.abs()),
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
   }
 }

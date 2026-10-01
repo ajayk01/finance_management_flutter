@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/app_data_cache.dart';
 import '../services/direct_sql_service.dart';
 
 class AddCategorySheet extends StatefulWidget {
@@ -54,6 +55,9 @@ class _AddCategorySheetState extends State<AddCategorySheet> {
         categoryType: _selectedType!.toLowerCase(),
         budget: budget,
       );
+
+      // Refresh the cache to pick up the new category in other screens
+      await AppDataCache().refreshCategories();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
