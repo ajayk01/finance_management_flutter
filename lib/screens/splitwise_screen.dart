@@ -216,7 +216,11 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
                     balance: swAmt,
                   ),
                   _buildTappableCell(
-                    child: _buildAmountCell(dbAmt, negativeIsRed: true),
+                    child: _buildAmountCell(
+                      dbAmt,
+                      decimals: 2,
+                      negativeIsRed: true,
+                    ),
                     friendId: friendId,
                     dbFriendId: dbFriendId,
                     friendName: name,
@@ -224,7 +228,11 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
                     balance: swAmt,
                   ),
                   _buildTappableCell(
-                    child: _buildAmountCell(swAmt, negativeIsRed: true),
+                    child: _buildAmountCell(
+                      swAmt,
+                      decimals: 2,
+                      negativeIsRed: true,
+                    ),
                     friendId: friendId,
                     dbFriendId: dbFriendId,
                     friendName: name,
@@ -268,7 +276,11 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
     );
   }
 
-  Widget _buildAmountCell(double amount, {bool negativeIsRed = false}) {
+  Widget _buildAmountCell(
+    double amount, {
+    int decimals = 0,
+    bool negativeIsRed = false,
+  }) {
     Color color = const Color(0xFF1E293B);
     if (negativeIsRed) {
       color = amount < 0
@@ -280,7 +292,7 @@ class _SplitwiseScreenState extends State<SplitwiseScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       child: Text(
-        formatINR(amount, decimals: 0),
+        formatINR(amount, decimals: decimals),
         style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,

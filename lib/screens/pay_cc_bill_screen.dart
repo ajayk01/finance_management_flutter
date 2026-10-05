@@ -1,8 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/models.dart';
-import '../services/api_service.dart';
 import '../services/app_data_cache.dart';
+import '../services/direct_sql_service.dart';
 
 class PayCcBillSheet extends StatefulWidget {
   const PayCcBillSheet({super.key});
@@ -22,7 +24,6 @@ class PayCcBillSheet extends StatefulWidget {
 
 class _PayCcBillSheetState extends State<PayCcBillSheet> {
   final _formKey = GlobalKey<FormState>();
-  final _api = ApiService();
   final _cache = AppDataCache();
 
   final _amountController = TextEditingController();
@@ -109,13 +110,21 @@ class _PayCcBillSheetState extends State<PayCcBillSheet> {
       final dateEpoch = dt.millisecondsSinceEpoch;
       final desc = _descController.text.trim();
 
-      await _api.payCcBill(
-        creditCardId: _selectedCard!.id,
-        bankAccountId: _selectedBank!.id,
+      await DirectSqlService.addTransferTransaction(
         amount: amount,
-        date: dateEpoch,
-        description: desc.isNotEmpty ? desc : null,
+        fromAccountId: _selectedBank!.id,
+        toAccountId: _selectedCard!.id,
+        notes: desc.isNotEmpty
+            ? desc
+            : 'Credit card payment for ${_selectedCard!.name}',
+        date: DateTime.fromMillisecondsSinceEpoch(dateEpoch),
+      ).timeout(
+        const Duration(seconds: 35),
+        onTimeout: () => throw TimeoutException(
+          'The payment is taking too long. Please check your connection and try again.',
+        ),
       );
+      _cache.invalidateAllTransactionCaches();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -125,6 +134,15 @@ class _PayCcBillSheetState extends State<PayCcBillSheet> {
           ),
         );
         Navigator.pop(context, true);
+      }
+    } on TimeoutException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message ?? 'Payment timed out. Please try again.'),
+            backgroundColor: const Color(0xFFEF4444),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -182,7 +200,8 @@ class _PayCcBillSheetState extends State<PayCcBillSheet> {
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return 'Enter amount';
                   final parsed = double.tryParse(v.trim());
-                  if (parsed == null || parsed <= 0) return 'Enter a valid amount';
+                  if (parsed == null || parsed <= 0)
+                    return 'Enter a valid amount';
                   return null;
                 },
                 decoration: _inputDecoration(hint: 'Enter amount'),

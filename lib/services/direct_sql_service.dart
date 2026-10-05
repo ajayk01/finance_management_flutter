@@ -1537,6 +1537,7 @@ WHERE a.IS_ACTIVE = 1
         'rewardsExtra': rewardsExtra,
         'rewardsName': rewardsName,
         'creditCardCapId': rowMap['credit_card_cap_id']?.toString(),
+        'mccCodeId': rowMap['mccCodeId']?.toString(),
         'type': type,
         'category': isTransfer
             ? 'Transfer'
@@ -1577,13 +1578,10 @@ WHERE a.IS_ACTIVE = 1
     final results = await Future.wait<dynamic>([
       getAllTransactions(month, year),
       getAllCategoriesAndSubCategories(type: 'expense'),
-      _getPendingSplitwiseExpenses(),
     ]);
 
     final transactions = results[0] as List<TransactionModel>;
     final categories = results[1] as List<Category>;
-    final pendingSplitwiseExpenses =
-        results[2] as List<Map<String, dynamic>>;
     final groupedExpenses = <String, Map<String, double>>{};
 
     void addAmount(String category, String subCategory, double amount) {
@@ -1614,14 +1612,6 @@ WHERE a.IS_ACTIVE = 1
           );
         }
       }
-    }
-
-    for (final expense in pendingSplitwiseExpenses) {
-      addAmount(
-        expense['category']?.toString() ?? '',
-        expense['subCategory']?.toString() ?? '',
-        _toDouble(expense['amount']),
-      );
     }
 
     final parsedYear = int.tryParse(year);
@@ -1700,29 +1690,6 @@ WHERE a.IS_ACTIVE = 1
               })
           .toList(),
     };
-  }
-
-  static Future<List<Map<String, dynamic>>> _getPendingSplitwiseExpenses() async {
-    const sql = '''
-SELECT st.SPLITED_AMOUNT, sf.NAME AS FRIEND_NAME
-FROM SplitwiseTransactions st
-INNER JOIN SplitwiseFriends sf ON sf.ID = st.FRIEND_ID
-WHERE st.TRANSACTION_ID IS NULL AND COALESCE(st.IS_SETTLED, 0) = 0
-''';
-    final config = MySqlConfig.fromDotEnv();
-    final service = MySqlService();
-    await service.connect(config);
-    final results = await service.executeReadQuery(sql);
-    final rows = results['rows'] as List? ?? [];
-
-    return rows.map((row) {
-      final rowMap = Map<String, dynamic>.from(row as Map);
-      return {
-        'category': 'From Splitwise',
-        'subCategory': rowMap['FRIEND_NAME']?.toString() ?? '',
-        'amount': _toDouble(rowMap['SPLITED_AMOUNT']),
-      };
-    }).toList();
   }
 
   static Future<Map<String, double>> getTransactionTypesSum(

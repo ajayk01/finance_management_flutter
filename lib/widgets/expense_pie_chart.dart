@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'dart:math';
-import '../services/api_service.dart';
 import '../services/direct_sql_service.dart';
-import '../models/models.dart' show Category;
+import '../models/models.dart' show Category, TransactionModel;
 import '../utils/currency_formatter.dart';
 
 class ExpensePieChart extends StatefulWidget {
@@ -19,11 +18,15 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
   late int _selectedYear;
   late int _selectedMonth;
   int _currentPage = 0;
-  final _api = ApiService();
 
   bool _loading = true;
+  int _loadRequestId = 0;
+  final ScrollController _headerControlsController = ScrollController();
   int? _touchedIndex;
+  bool _showTable = false;
+  String? _selectedTableCategory;
   double _budget = 0;
+  List<TransactionModel> _transactions = [];
   List<_ExpenseCategory> _categories = [];
   List<_ExpenseCategory> _incomeCategories = [];
   List<_ExpenseCategory> _investmentCategories = [];
@@ -57,96 +60,70 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
   }
 
   Future<void> _loadPieData() async {
+    final requestId = ++_loadRequestId;
+    final selectedYear = _selectedYear;
+    final selectedMonth = _selectedMonth;
     setState(() => _loading = true);
     try {
-      final now = DateTime.now();
-      final isCurrentMonth = _selectedYear == now.year && _selectedMonth == now.month;
-      if (isCurrentMonth && widget.categories != null && widget.categories!.isNotEmpty) {
-        final cats = widget.categories!;
-        final month = DateFormat('MMM').format(now).toLowerCase();
-        final expenseData = await DirectSqlService.getMonthlyExpenses(
-          month,
-          now.year.toString(),
-        );
-        _categories = _parseCategories(expenseData, _expenseColors);
-        _incomeCategories = _fromModelCategories(
-            cats.where((c) => c.type == 'income').toList(), _incomeColors);
-        _investmentCategories = _fromModelCategories(
-            cats.where((c) => c.type == 'investment').toList(), _investColors);
-        _budget = cats
-            .where((c) => c.type == 'expense')
-            .fold<double>(0, (sum, c) => sum + c.budget);
-      } else {
-        final month = DateFormat('MMM').format(DateTime(_selectedYear, _selectedMonth)).toLowerCase();
-        final year = _selectedYear.toString();
-        final results = await Future.wait([
-          DirectSqlService.getMonthlyExpenses(month, year),
-          _api.getMonthlyIncome(month: month, year: year),
-          _api.getMonthlyInvestments(month: month, year: year),
-          _api.getCategories(type: 'expense'),
-        ]);
-
-        _categories = _parseCategories(results[0], _expenseColors);
-        _incomeCategories = _parseCategories(results[1], _incomeColors);
-        _investmentCategories = _parseCategories(results[2], _investColors);
-
-        _budget = (results[3]['categories'] as List? ?? [])
-            .map((j) => Category.fromJson(j))
-            .where((Category c) => c.type == 'expense')
-            .fold<double>(0, (sum, c) => sum + c.budget);
-      }
-    } catch (_) {
-      // Keep empty lists
-    }
-    if (mounted) setState(() => _loading = false);
-  }
-
-  List<_ExpenseCategory> _fromModelCategories(
-      List<Category> cats, List<Color> colors) {
-    final nonZero = cats.where((c) => c.amount > 0).toList();
-    return nonZero.asMap().entries.map((e) => _ExpenseCategory(
-        e.value.name,
-        e.value.amount,
-        colors[e.key % colors.length],
-    )).toList();
-  }
-
-  List<_ExpenseCategory> _parseCategories(
-      Map<String, dynamic> data, List<Color> colors) {
-
-    double parseAmount(dynamic value) {
-      if (value == null) return 0;
-      if (value is num) return value.toDouble();
-      if (value is String) {
-        final cleaned = value.replaceAll(RegExp(r'[^0-9.\-]'), '');
-        return double.tryParse(cleaned) ?? 0;
-      }
-      return 0;
-    }
-
-    // API returns monthlyExpenses / monthlyIncome / monthlyInvestments arrays
-    // or categories array — try all known keys
-    final list = data['monthlyExpenses'] as List?
-        ?? data['monthlyIncome'] as List?
-        ?? data['monthlyInvestments'] as List?
-        ?? data['categories'] as List?
-        ?? [];
-    // Group by category name and sum amounts
-    final catMap = <String, double>{};
-    for (final item in list) {
-      final j = item as Map<String, dynamic>;
-      final name = (j['category'] ?? j['name'] ?? 'Other').toString();
-      final raw = j['expense'] ?? j['amount'] ?? j['total'] ?? 0;
-      final amount = parseAmount(raw);
-      catMap[name] = (catMap[name] ?? 0) + amount;
-    }
-    return catMap.entries.toList().asMap().entries.map((e) {
-      return _ExpenseCategory(
-        e.value.key,
-        e.value.value,
-        colors[e.key % colors.length],
+      final month = DateFormat('MMM')
+        .format(DateTime(selectedYear, selectedMonth))
+        .toLowerCase();
+      final transactions = await DirectSqlService.getAllTransactions(
+      month,
+      selectedYear.toString(),
       );
-    }).toList();
+      final expenseCategories =
+        _fromTransactions(transactions, 'expense', _expenseColors);
+      final incomeCategories =
+        _fromTransactions(transactions, 'income', _incomeColors);
+      final investmentCategories =
+        _fromTransactions(transactions, 'investment', _investColors);
+      final budget = (widget.categories ?? const <Category>[])
+        .where((category) => category.type == 'expense')
+        .fold<double>(0, (sum, category) => sum + category.budget);
+      if (!mounted || requestId != _loadRequestId) {
+        return;
+      }
+      setState(() {
+        _transactions = transactions;
+        _categories = expenseCategories;
+        _incomeCategories = incomeCategories;
+        _investmentCategories = investmentCategories;
+        _budget = budget;
+        _selectedTableCategory = null;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted || requestId != _loadRequestId) {
+        return;
+      }
+      setState(() => _loading = false);
+    }
+  }
+
+  List<_ExpenseCategory> _fromTransactions(
+    List<TransactionModel> transactions,
+    String type,
+    List<Color> colors,
+  ) {
+    final amountsByCategory = <String, double>{};
+    for (final transaction in transactions.where((item) => item.type == type)) {
+      final category = transaction.category ?? 'Other';
+      amountsByCategory[category] =
+          (amountsByCategory[category] ?? 0) + transaction.amount;
+    }
+
+    return amountsByCategory.entries
+        .where((entry) => entry.value != 0)
+        .toList()
+        .asMap()
+        .entries
+        .map((entry) => _ExpenseCategory(
+              entry.value.key,
+              entry.value.value,
+              colors[entry.key % colors.length],
+            ))
+        .toList();
   }
 
   double get _total =>
@@ -160,6 +137,7 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
 
   @override
   void dispose() {
+    _headerControlsController.dispose();
     super.dispose();
   }
 
@@ -175,18 +153,22 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                _pageTitles[_currentPage],
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade900,
-                ),
-              ),
-              Row(
+          Text(
+            _pageTitles[_currentPage],
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey.shade900,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Scrollbar(
+            controller: _headerControlsController,
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              controller: _headerControlsController,
+              scrollDirection: Axis.horizontal,
+              child: Row(
                 children: [
                   _dropdownButton(
                     label: _monthNames[_selectedMonth - 1].substring(0, 3),
@@ -197,16 +179,31 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
                     label: '$_selectedYear',
                     onTap: () => _showYearDropdown(),
                   ),
+                  const SizedBox(width: 10),
+                  _dropdownButton(
+                    label: _showTable ? 'Chart' : 'Table',
+                    icon: _showTable
+                        ? Icons.pie_chart_outline
+                        : Icons.table_chart_outlined,
+                    onTap: _loading
+                        ? () {}
+                        : () => setState(() {
+                              _showTable = !_showTable;
+                              _selectedTableCategory = null;
+                            }),
+                  ),
                 ],
               ),
-            ],
+            ),
           ),
           const SizedBox(height: 24),
           SizedBox(
             height: 300,
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : PageView(
+                : _showTable
+                    ? _buildTableView()
+                    : PageView(
               controller: PageController(initialPage: _currentPage),
               onPageChanged: (index) => setState(() {
                 _currentPage = index;
@@ -220,7 +217,7 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
             ),
           ),
           const SizedBox(height: 16),
-          if (_loading)
+          if (_loading || _showTable)
             const SizedBox.shrink()
           else
             _buildCategoryLegend(),
@@ -306,6 +303,118 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
       case 2: return _investmentTotal;
       default: return _total;
     }
+  }
+
+  String get _currentTransactionType {
+    switch (_currentPage) {
+      case 1:
+        return 'income';
+      case 2:
+        return 'investment';
+      default:
+        return 'expense';
+    }
+  }
+
+  Widget _buildTableView() {
+    final transactions = _transactions
+        .where((transaction) => transaction.type == _currentTransactionType)
+        .toList();
+    final isShowingSubcategories = _selectedTableCategory != null;
+    final amounts = <String, double>{};
+
+    for (final transaction in transactions) {
+      if (isShowingSubcategories &&
+          transaction.category != _selectedTableCategory) {
+        continue;
+      }
+      final label = isShowingSubcategories
+          ? (transaction.subCategory ?? 'Uncategorized')
+          : (transaction.category ?? 'Other');
+      amounts[label] = (amounts[label] ?? 0) + transaction.amount;
+    }
+
+    final rows = amounts.entries.toList()
+      ..sort((first, second) => second.value.compareTo(first.value));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (isShowingSubcategories)
+          TextButton.icon(
+            onPressed: () => setState(() => _selectedTableCategory = null),
+            icon: const Icon(Icons.arrow_back, size: 18),
+            label: Text(_selectedTableCategory!),
+          )
+        else
+          const Padding(
+            padding: EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Category totals',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+        Expanded(
+          child: rows.isEmpty
+              ? const Center(child: Text('No transactions for this period.'))
+              : SingleChildScrollView(
+                  child: Table(
+                    columnWidths: const {
+                      0: FlexColumnWidth(),
+                      1: IntrinsicColumnWidth(),
+                    },
+                    border: const TableBorder(
+                      horizontalInside: BorderSide(color: Color(0xFFE5E7EB)),
+                    ),
+                    children: [
+                      const TableRow(
+                        decoration: BoxDecoration(color: Color(0xFFF5F5F8)),
+                        children: [
+                          Padding(
+                            padding: EdgeInsets.all(12),
+                            child: Text('Category', style: TextStyle(fontWeight: FontWeight.w600)),
+                          ),
+                          Padding(
+                            padding: EdgeInsets.all(12),
+                            child: Text('Total', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.w600)),
+                          ),
+                        ],
+                      ),
+                      ...rows.map((entry) => TableRow(
+                            children: [
+                              InkWell(
+                                onTap: isShowingSubcategories
+                                    ? null
+                                    : () => setState(() {
+                                          _selectedTableCategory = entry.key;
+                                        }),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Row(
+                                    children: [
+                                      Expanded(child: Text(entry.key)),
+                                      if (!isShowingSubcategories)
+                                        const Icon(Icons.chevron_right, size: 18),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Text(
+                                  formatINR(entry.value),
+                                  textAlign: TextAlign.right,
+                                  style: const TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ],
+                          )),
+                    ],
+                  ),
+                ),
+        ),
+      ],
+    );
   }
 
   Widget _buildCategoryLegend() {
@@ -396,7 +505,11 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
     }
   }
 
-  Widget _dropdownButton({required String label, required VoidCallback onTap}) {
+  Widget _dropdownButton({
+    required String label,
+    required VoidCallback onTap,
+    IconData icon = Icons.keyboard_arrow_down,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -414,7 +527,7 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
               style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
             ),
             const SizedBox(width: 4),
-            Icon(Icons.keyboard_arrow_down, size: 16, color: Colors.grey.shade500),
+            Icon(icon, size: 16, color: Colors.grey.shade500),
           ],
         ),
       ),
@@ -661,8 +774,23 @@ class _DonutWithLabelsPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _DonutWithLabelsPainter oldDelegate) =>
-      oldDelegate.total != total ||
-      oldDelegate.touchedIndex != touchedIndex ||
-      oldDelegate.categories.length != categories.length;
+  bool shouldRepaint(covariant _DonutWithLabelsPainter oldDelegate) {
+    if (oldDelegate.total != total ||
+        oldDelegate.budget != budget ||
+        oldDelegate.touchedIndex != touchedIndex ||
+        oldDelegate.categories.length != categories.length) {
+      return true;
+    }
+
+    for (var index = 0; index < categories.length; index++) {
+      final previous = oldDelegate.categories[index];
+      final current = categories[index];
+      if (previous.name != current.name ||
+          previous.amount != current.amount ||
+          previous.color != current.color) {
+        return true;
+      }
+    }
+    return false;
+  }
 }

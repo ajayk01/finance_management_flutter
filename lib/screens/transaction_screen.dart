@@ -1580,7 +1580,26 @@ class _TransactionScreenState extends State<TransactionScreen> {
     );
   }
 
-  void _showTransactionDetails(TransactionModel tx) {
+  Future<void> _showTransactionDetails(TransactionModel tx) async {
+    String? mccDetails;
+    if (tx.mccCodeId?.isNotEmpty ?? false) {
+      try {
+        final mccCodes = await DirectSqlService.getAllMCCCodes();
+        final matchingCode = mccCodes.where(
+          (code) => code['id']?.toString() == tx.mccCodeId,
+        );
+        if (matchingCode.isNotEmpty) {
+          final mccCode = matchingCode.first;
+          mccDetails = '${mccCode['mcc_code']} - ${mccCode['name']}';
+        }
+      } catch (_) {
+        mccDetails = null;
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1625,6 +1644,11 @@ class _TransactionScreenState extends State<TransactionScreen> {
               _buildTransactionDetailRow('Category', tx.category ?? 'Uncategorized'),
               if (tx.subCategory != null && tx.subCategory!.isNotEmpty)
                 _buildTransactionDetailRow('Subcategory', tx.subCategory!),
+              if (mccDetails != null || (tx.mccCodeId?.isNotEmpty ?? false))
+                _buildTransactionDetailRow(
+                  'MCC Code',
+                  mccDetails ?? 'MCC ID: ${tx.mccCodeId}',
+                ),
               const SizedBox(height: 20),
               const Text('Account details',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),

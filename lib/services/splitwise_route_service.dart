@@ -28,7 +28,7 @@ class SplitwiseRouteService {
       },
       reauthenticate: reauthenticate,
     );
-
+  
     if (response.statusCode < 200 || response.statusCode >= 300) {
       Map<String, dynamic> errorBody = {'error': 'Failed to parse error body'};
       try {
@@ -484,10 +484,11 @@ class SplitwiseRouteService {
       for (final notification in notifications) {
         final source = notification['source'];
         final content = notification['content']?.toString().toLowerCase() ?? '';
+        final isUpdate = content.contains('updated');
         if (source is! Map ||
             source['type']?.toString() != 'Expense' ||
             source['id'] == null ||
-            !content.contains('added')) {
+            (!content.contains('added') && !isUpdate)) {
           continue;
         }
 
@@ -516,15 +517,6 @@ class SplitwiseRouteService {
           continue;
         }
 
-        final existing = await _mySqlService.executeReadQuery(
-          'SELECT SPLITWISE_TRANSACTION_ID FROM SplitwiseTransactions '
-          'WHERE SPLITWISE_TRANSACTION_ID = :expenseId LIMIT 1',
-          {'expenseId': expenseId},
-        );
-        if ((existing['rows'] as List? ?? const []).isNotEmpty) {
-          continue;
-        }
-
         final friendResult = await _mySqlService.executeReadQuery(
           'SELECT ID FROM SplitwiseFriends '
           'WHERE SPLITWISE_FRIEND_ID = :friendId LIMIT 1',
@@ -539,6 +531,36 @@ class SplitwiseRouteService {
           Map<String, dynamic>.from(friendRows.first as Map)['ID'],
         );
         if (localFriendId == null) {
+          continue;
+        }
+
+        final existing = await _mySqlService.executeReadQuery(
+          'SELECT SPLITED_AMOUNT FROM SplitwiseTransactions '
+          'WHERE SPLITWISE_TRANSACTION_ID = :expenseId '
+          'AND FRIEND_ID = :friendId LIMIT 1',
+          {
+            'expenseId': expenseId,
+            'friendId': localFriendId,
+          },
+        );
+        final existingRows = existing['rows'] as List? ?? const [];
+        if (existingRows.isNotEmpty) {
+          final existingAmount = _toDouble(
+            Map<String, dynamic>.from(existingRows.first as Map)[
+                'SPLITED_AMOUNT'],
+          );
+          if (isUpdate && (existingAmount - amount).abs() >= 0.01) {
+            await _mySqlService.executeWriteQuery(
+              'UPDATE SplitwiseTransactions SET SPLITED_AMOUNT = :amount '
+              'WHERE SPLITWISE_TRANSACTION_ID = :expenseId '
+              'AND FRIEND_ID = :friendId',
+              {
+                'amount': amount,
+                'expenseId': expenseId,
+                'friendId': localFriendId,
+              },
+            );
+          }
           continue;
         }
 
@@ -574,15 +596,20 @@ class SplitwiseRouteService {
     var matchingNotifications = <Map<String, dynamic>>[];
 
     while (matchingNotifications.isEmpty && limit <= 200) {
-      final response = await _fetchSplitwise(
-        'get_notifications?limit=$limit',
-        reauthenticate,
+      final notifications = await _fetchNotifications(
+        limit: limit,
+        reauthenticate: reauthenticate,
       );
-      final notifications = (response['notifications'] as List? ?? const [])
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList();
+      debugPrint('Fetched ${notifications.length} notifications.');
+      for (var index = 0; index < notifications.length; index++) {
+        debugPrint(
+          'Notification ${index + 1}/${notifications.length}: '
+          '${jsonEncode(notifications[index])}',
+          wrapWidth: 1024,
+        );
+      }
       if (notifications.isEmpty) {
+        debugPrint('No notifications found. Breaking the loop.');
         break;
       }
 
@@ -611,6 +638,20 @@ class SplitwiseRouteService {
     }
 
     return matchingNotifications;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchNotifications({
+    required int limit,
+    required Future<void> Function() reauthenticate,
+  }) async {
+    final response = await _fetchSplitwise(
+      'get_notifications?limit=$limit',
+      reauthenticate,
+    );
+    return (response['notifications'] as List? ?? const [])
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
   }
 
   Future<List<SplitwiseGroup>> getGroupsWithMembers({

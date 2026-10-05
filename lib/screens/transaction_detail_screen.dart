@@ -16,6 +16,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
   bool _loading = true;
   String? _error;
   TransactionModel? _transaction;
+  String? _mccDetails;
 
   @override
   void initState() {
@@ -29,8 +30,20 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
       if (tx == null) {
         throw StateError('Transaction not found');
       }
+      String? mccDetails;
+      if (tx.mccCodeId?.isNotEmpty ?? false) {
+        final mccCodes = await DirectSqlService.getAllMCCCodes();
+        for (final mccCode in mccCodes) {
+          if (mccCode['id']?.toString() == tx.mccCodeId) {
+            mccDetails =
+                '${mccCode['mcc_code']} - ${mccCode['name']}';
+            break;
+          }
+        }
+      }
       setState(() {
         _transaction = tx;
+        _mccDetails = mccDetails;
         _loading = false;
       });
     } catch (e) {
@@ -184,6 +197,18 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                 _buildRow(Icons.subdirectory_arrow_right, 'Sub Category',
                     tx.subCategory!, colorScheme),
             ]),
+
+          if (_mccDetails != null || (tx.mccCodeId?.isNotEmpty ?? false)) ...[
+            const SizedBox(height: 12),
+            _buildCard(context, [
+              _buildRow(
+                Icons.storefront_outlined,
+                'MCC Code',
+                _mccDetails ?? 'MCC ID: ${tx.mccCodeId}',
+                colorScheme,
+              ),
+            ]),
+          ],
 
           if (tx.investmentAccountName != null) ...[
             const SizedBox(height: 12),
