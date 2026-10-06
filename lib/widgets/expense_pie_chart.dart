@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'dart:math';
 import '../services/direct_sql_service.dart';
-import '../models/models.dart' show Category, TransactionModel;
+import '../models/models.dart' show Category;
 import '../utils/currency_formatter.dart';
 
 class ExpensePieChart extends StatefulWidget {
@@ -26,7 +26,9 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
   bool _showTable = false;
   String? _selectedTableCategory;
   double _budget = 0;
-  List<TransactionModel> _transactions = [];
+  List<MonthlyPieChartCategory> _expenseData = [];
+  List<MonthlyPieChartCategory> _incomeData = [];
+  List<MonthlyPieChartCategory> _investmentData = [];
   List<_ExpenseCategory> _categories = [];
   List<_ExpenseCategory> _incomeCategories = [];
   List<_ExpenseCategory> _investmentCategories = [];
@@ -68,16 +70,16 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
       final month = DateFormat('MMM')
         .format(DateTime(selectedYear, selectedMonth))
         .toLowerCase();
-      final transactions = await DirectSqlService.getAllTransactions(
+      final chartData = await DirectSqlService.getMonthlyPieChartData(
       month,
       selectedYear.toString(),
       );
       final expenseCategories =
-        _fromTransactions(transactions, 'expense', _expenseColors);
+          _fromAggregates(chartData.expenses, _expenseColors);
       final incomeCategories =
-        _fromTransactions(transactions, 'income', _incomeColors);
+          _fromAggregates(chartData.income, _incomeColors);
       final investmentCategories =
-        _fromTransactions(transactions, 'investment', _investColors);
+          _fromAggregates(chartData.investments, _investColors);
       final budget = (widget.categories ?? const <Category>[])
         .where((category) => category.type == 'expense')
         .fold<double>(0, (sum, category) => sum + category.budget);
@@ -85,7 +87,9 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
         return;
       }
       setState(() {
-        _transactions = transactions;
+        _expenseData = chartData.expenses;
+        _incomeData = chartData.income;
+        _investmentData = chartData.investments;
         _categories = expenseCategories;
         _incomeCategories = incomeCategories;
         _investmentCategories = investmentCategories;
@@ -101,26 +105,18 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
     }
   }
 
-  List<_ExpenseCategory> _fromTransactions(
-    List<TransactionModel> transactions,
-    String type,
+  List<_ExpenseCategory> _fromAggregates(
+    List<MonthlyPieChartCategory> categories,
     List<Color> colors,
   ) {
-    final amountsByCategory = <String, double>{};
-    for (final transaction in transactions.where((item) => item.type == type)) {
-      final category = transaction.category ?? 'Other';
-      amountsByCategory[category] =
-          (amountsByCategory[category] ?? 0) + transaction.amount;
-    }
-
-    return amountsByCategory.entries
-        .where((entry) => entry.value != 0)
+    return categories
+        .where((category) => category.amount != 0)
         .toList()
         .asMap()
         .entries
         .map((entry) => _ExpenseCategory(
-              entry.value.key,
-              entry.value.value,
+              entry.value.name,
+              entry.value.amount,
               colors[entry.key % colors.length],
             ))
         .toList();
@@ -305,37 +301,36 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
     }
   }
 
-  String get _currentTransactionType {
+  List<MonthlyPieChartCategory> get _currentTableData {
     switch (_currentPage) {
       case 1:
-        return 'income';
+        return _incomeData;
       case 2:
-        return 'investment';
+        return _investmentData;
       default:
-        return 'expense';
+        return _expenseData;
     }
   }
 
   Widget _buildTableView() {
-    final transactions = _transactions
-        .where((transaction) => transaction.type == _currentTransactionType)
-        .toList();
     final isShowingSubcategories = _selectedTableCategory != null;
-    final amounts = <String, double>{};
-
-    for (final transaction in transactions) {
-      if (isShowingSubcategories &&
-          transaction.category != _selectedTableCategory) {
-        continue;
-      }
-      final label = isShowingSubcategories
-          ? (transaction.subCategory ?? 'Uncategorized')
-          : (transaction.category ?? 'Other');
-      amounts[label] = (amounts[label] ?? 0) + transaction.amount;
-    }
-
-    final rows = amounts.entries.toList()
-      ..sort((first, second) => second.value.compareTo(first.value));
+    final selectedCategory = isShowingSubcategories
+        ? _currentTableData.firstWhere(
+            (category) => category.name == _selectedTableCategory,
+          )
+        : null;
+    final rows = isShowingSubcategories
+        ? selectedCategory!.subcategories.entries.toList()
+        : _currentTableData
+            .map((category) => MapEntry(category.name, category.amount))
+            .toList();
+    rows.sort((first, second) => second.value.compareTo(first.value));
+    final isInvestmentTable = _currentPage == 2;
+    final firstColumnTitle = isInvestmentTable && !isShowingSubcategories
+        ? 'Investment account'
+        : isShowingSubcategories
+            ? 'Subcategory'
+            : 'Category';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -367,14 +362,14 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
                       horizontalInside: BorderSide(color: Color(0xFFE5E7EB)),
                     ),
                     children: [
-                      const TableRow(
-                        decoration: BoxDecoration(color: Color(0xFFF5F5F8)),
+                      TableRow(
+                        decoration: const BoxDecoration(color: Color(0xFFF5F5F8)),
                         children: [
                           Padding(
-                            padding: EdgeInsets.all(12),
-                            child: Text('Category', style: TextStyle(fontWeight: FontWeight.w600)),
+                            padding: const EdgeInsets.all(12),
+                            child: Text(firstColumnTitle, style: const TextStyle(fontWeight: FontWeight.w600)),
                           ),
-                          Padding(
+                          const Padding(
                             padding: EdgeInsets.all(12),
                             child: Text('Total', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.w600)),
                           ),
@@ -383,7 +378,7 @@ class _ExpensePieChartState extends State<ExpensePieChart> {
                       ...rows.map((entry) => TableRow(
                             children: [
                               InkWell(
-                                onTap: isShowingSubcategories
+                                onTap: isShowingSubcategories || isInvestmentTable
                                     ? null
                                     : () => setState(() {
                                           _selectedTableCategory = entry.key;

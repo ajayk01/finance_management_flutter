@@ -15,6 +15,30 @@ class ActiveAccountsResult {
   final List<InvestmentAccount> investmentAccounts;
 }
 
+class MonthlyPieChartData {
+  const MonthlyPieChartData({
+    required this.expenses,
+    required this.income,
+    required this.investments,
+  });
+
+  final List<MonthlyPieChartCategory> expenses;
+  final List<MonthlyPieChartCategory> income;
+  final List<MonthlyPieChartCategory> investments;
+}
+
+class MonthlyPieChartCategory {
+  const MonthlyPieChartCategory({
+    required this.name,
+    required this.amount,
+    this.subcategories = const {},
+  });
+
+  final String name;
+  final double amount;
+  final Map<String, double> subcategories;
+}
+
 class DirectSqlService {
   static int _mapAccountType(String accountType) {
     switch (accountType.trim().toLowerCase()) {
@@ -206,6 +230,89 @@ class DirectSqlService {
     final fromTimestamp = startOfMonth.millisecondsSinceEpoch;
     final toTimestamp = startOfNextMonth.millisecondsSinceEpoch - 1;
     return (fromTimestamp: fromTimestamp, toTimestamp: toTimestamp);
+  }
+
+  static Future<MonthlyPieChartData> getMonthlyPieChartData(
+    String month,
+    String year,
+  ) async {
+    final range = _getMonthRangeTimestamps(month, year);
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+
+    Future<List<MonthlyPieChartCategory>> getCategoryTotals(int type) async {
+      final splitwiseJoin = type == 1
+        ? "LEFT JOIN ("
+          "SELECT TRANSACTION_ID, SUM(SPLITED_AMOUNT) AS total_split "
+          "FROM SplitwiseTransactions "
+          "WHERE COALESCE(IS_SETTLED, 0) = 0 "
+          "GROUP BY TRANSACTION_ID"
+          ") st ON st.TRANSACTION_ID = t.ID "
+        : '';
+      final amountExpression =
+        type == 1 ? 't.AMOUNT - COALESCE(st.total_split, 0)' : 't.AMOUNT';
+      final sql = "SELECT "
+          "COALESCE(c.CATEGORY_NAME, 'Uncategorized') AS category_name, "
+          "COALESCE(s.SUB_CATEGORY_NAME, 'Uncategorized') AS subcategory_name, "
+        "SUM($amountExpression) AS total_amount "
+          "FROM Transactions t "
+          "LEFT JOIN Category c ON c.ID = t.CATEGORY_ID "
+          "LEFT JOIN SubCategory s ON s.ID = t.SUB_CATEGORY_ID "
+        "$splitwiseJoin"
+          "WHERE t.TRANSCATION_TYPE = $type "
+          "AND t.DATE >= ${range.fromTimestamp} "
+          "AND t.DATE <= ${range.toTimestamp} "
+          "GROUP BY c.CATEGORY_NAME, s.SUB_CATEGORY_NAME "
+        "HAVING SUM($amountExpression) <> 0 "
+          "ORDER BY total_amount DESC";
+      final result = await service.executeReadQuery(sql);
+      final categories = <String, Map<String, double>>{};
+      for (final row in result['rows'] as List? ?? []) {
+        final values = Map<String, dynamic>.from(row as Map);
+        final category = values['category_name']?.toString() ?? 'Uncategorized';
+        final subcategory =
+            values['subcategory_name']?.toString() ?? 'Uncategorized';
+        categories.putIfAbsent(category, () => <String, double>{})[subcategory] =
+            _toDouble(values['total_amount']);
+      }
+      return categories.entries
+          .map((entry) => MonthlyPieChartCategory(
+                name: entry.key,
+                amount: entry.value.values.fold(0, (sum, value) => sum + value),
+                subcategories: entry.value,
+              ))
+          .toList();
+    }
+
+    final investmentSql = "SELECT "
+        "COALESCE(a.ACCOUNT_NAME, 'Uncategorized') AS account_name, "
+        "SUM(t.AMOUNT) AS total_amount "
+        "FROM Transactions t "
+        "LEFT JOIN Accounts a ON a.ID = t.TO_ACCOUNT_ID "
+        "WHERE t.TRANSCATION_TYPE = 4 "
+        "AND t.DATE >= ${range.fromTimestamp} "
+        "AND t.DATE <= ${range.toTimestamp} "
+        "GROUP BY a.ACCOUNT_NAME "
+        "HAVING SUM(t.AMOUNT) <> 0 "
+        "ORDER BY total_amount DESC";
+
+    final expenses = await getCategoryTotals(1);
+    final income = await getCategoryTotals(2);
+    final investmentRows = await service.executeReadQuery(investmentSql);
+    final investments = (investmentRows['rows'] as List? ?? [])
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .map((row) => MonthlyPieChartCategory(
+              name: row['account_name']?.toString() ?? 'Uncategorized',
+              amount: _toDouble(row['total_amount']),
+            ))
+        .toList();
+
+    return MonthlyPieChartData(
+      expenses: expenses,
+      income: income,
+      investments: investments,
+    );
   }
 
   static String _mapTransactionType(dynamic value) {
