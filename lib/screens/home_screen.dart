@@ -37,6 +37,10 @@ class _HomeScreenState extends State<HomeScreen> {
   double _totalInvestment = 0;
   double _budgetSpent = 0;
   double _budgetTotal = 0;
+  DateTime _moneyFlowPeriod = DateTime.now();
+  bool _moneyFlowLoading = false;
+  String? _moneyFlowError;
+  int _moneyFlowRequestId = 0;
 
   @override
   void initState() {
@@ -44,14 +48,11 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadData();
   }
 
-  Future<ActiveAccountsResult> _safeFetchAccounts(String month, String year) async 
-  {
-    try 
-    {
+  Future<ActiveAccountsResult> _safeFetchAccounts(
+      String month, String year) async {
+    try {
       return await DirectSqlService.getAllActiveAccounts();
-    } 
-    catch (e) 
-    {
+    } catch (e) {
       debugPrint('[HomeScreen] getAccounts failed: $e');
       return const ActiveAccountsResult();
     }
@@ -61,10 +62,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final now = DateTime.now();
     final month = DateFormat('MMM').format(now).toLowerCase();
     final year = now.year.toString();
+    _moneyFlowPeriod = DateTime(now.year, now.month);
 
     // Load accounts and categories in PARALLEL instead of sequentially
     final accountsFuture = _safeFetchAccounts(month, year);
-    final expenseCategoriesFuture = DirectSqlService.getExpenseCategories(month, year).catchError((e) {
+    final expenseCategoriesFuture =
+        DirectSqlService.getExpenseCategories(month, year).catchError((e) {
       debugPrint('[HomeScreen] getExpenseCategories failed: $e');
       return (
         categories: <Category>[],
@@ -73,10 +76,19 @@ class _HomeScreenState extends State<HomeScreen> {
         totalInvestment: 0.0,
       );
     });
+    final moneyFlowFuture =
+        DirectSqlService.getMonthlyMoneyFlow(month, year).catchError((e) {
+      debugPrint('[HomeScreen] getMonthlyMoneyFlow failed: $e');
+      return (income: 0.0, expense: 0.0, investment: 0.0);
+    });
 
-    // Wait for both in parallel
-    final results = await Future.wait([accountsFuture, expenseCategoriesFuture]);
-    
+    // Wait for all dashboard data in parallel.
+    final results = await Future.wait([
+      accountsFuture,
+      expenseCategoriesFuture,
+      moneyFlowFuture,
+    ]);
+
     final accountsData = results[0] as ActiveAccountsResult;
     final categoriesResult = results[1] as ({
       List<Category> categories,
@@ -84,6 +96,8 @@ class _HomeScreenState extends State<HomeScreen> {
       double totalExpense,
       double totalInvestment
     });
+    final moneyFlow =
+        results[2] as ({double income, double expense, double investment});
 
     final expenseCategories = categoriesResult.categories;
 
@@ -91,15 +105,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final cards = accountsData.creditCardAccounts;
     final investments = accountsData.investmentAccounts;
 
-    final double income = categoriesResult.totalIncome;
-    final double expense = categoriesResult.totalExpense;
-    final double investment = categoriesResult.totalInvestment;
+    final double income = moneyFlow.income;
+    final double expense = moneyFlow.expense;
+    final double investment = moneyFlow.investment;
 
     final List<Category> cats = (expenseCategories as List<Category>? ?? [])
         .where((c) => c.type == 'expense')
         .toList();
-    final totalBudget =
-        cats.fold<double>(0, (sum, c) => sum + c.budget);
+    final totalBudget = cats.fold<double>(0, (sum, c) => sum + c.budget);
 
     final expenseByCategory = <String, double>{};
     final incomeByCategory = <String, double>{};
@@ -146,9 +159,43 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _changeMoneyFlowPeriod(DateTime period) async {
+    final normalizedPeriod = DateTime(period.year, period.month);
+    final requestId = ++_moneyFlowRequestId;
+    setState(() {
+      _moneyFlowPeriod = normalizedPeriod;
+      _moneyFlowLoading = true;
+      _moneyFlowError = null;
+    });
+
+    try {
+      final moneyFlow = await DirectSqlService.getMonthlyMoneyFlow(
+        DateFormat('MMM').format(normalizedPeriod).toLowerCase(),
+        normalizedPeriod.year.toString(),
+      );
+      if (!mounted || requestId != _moneyFlowRequestId) {
+        return;
+      }
+      setState(() {
+        _totalIncome = moneyFlow.income;
+        _totalExpense = moneyFlow.expense;
+        _totalInvestment = moneyFlow.investment;
+        _moneyFlowLoading = false;
+      });
+    } catch (error) {
+      debugPrint('[HomeScreen] getMonthlyMoneyFlow failed: $error');
+      if (!mounted || requestId != _moneyFlowRequestId) {
+        return;
+      }
+      setState(() {
+        _moneyFlowLoading = false;
+        _moneyFlowError = 'Could not load Money Flow for this period.';
+      });
+    }
+  }
+
   @override
-  Widget build(BuildContext context) 
-  {
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F8),
       body: _buildBody(),
@@ -225,6 +272,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     income: _totalIncome,
                     expense: _totalExpense,
                     investment: _totalInvestment,
+                    selectedPeriod: _moneyFlowPeriod,
+                    onPeriodChanged: _changeMoneyFlowPeriod,
+                    loading: _moneyFlowLoading,
+                    errorMessage: _moneyFlowError,
                   ),
                   const SizedBox(height: 80),
                 ],

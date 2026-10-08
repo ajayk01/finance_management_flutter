@@ -87,7 +87,8 @@ class DirectSqlService {
   }) {
     double baseRewards = 0;
     for (final cap in baseCaps) {
-      final capPercentage = _toDouble(cap['CAP_PERCENTAGE'] ?? cap['capPercentage']);
+      final capPercentage =
+          _toDouble(cap['CAP_PERCENTAGE'] ?? cap['capPercentage']);
       final rewardPerAmount =
           _toDouble(cap['REWARD_PER_AMOUNT'] ?? cap['rewardPerAmount']);
       final singleCapRewards = DirectExpenseService.calculateRewardPoints(
@@ -98,7 +99,8 @@ class DirectSqlService {
       baseRewards += singleCapRewards;
     }
 
-    final extraRewards = totalRewards > baseRewards ? totalRewards - baseRewards : 0.0;
+    final extraRewards =
+        totalRewards > baseRewards ? totalRewards - baseRewards : 0.0;
     return (baseRewards: baseRewards, extraRewards: extraRewards);
   }
 
@@ -113,7 +115,7 @@ class DirectSqlService {
     }
 
     final baseCapPercentage = _toDouble(
-      baseCaps.first['CAP_PERCENTAGE'] ?? baseCaps.first['capPercentage']);
+        baseCaps.first['CAP_PERCENTAGE'] ?? baseCaps.first['capPercentage']);
     if (baseCapPercentage <= 0) {
       return '';
     }
@@ -133,7 +135,7 @@ class DirectSqlService {
     }
 
     final currentCapPercentage = _toDouble(
-      capRows.first['CAP_PERCENTAGE'] ?? capRows.first['capPercentage']);
+        capRows.first['CAP_PERCENTAGE'] ?? capRows.first['capPercentage']);
     final ratio = currentCapPercentage / baseCapPercentage;
     if (ratio <= 0) {
       return '';
@@ -243,28 +245,28 @@ class DirectSqlService {
 
     Future<List<MonthlyPieChartCategory>> getCategoryTotals(int type) async {
       final splitwiseJoin = type == 1
-        ? "LEFT JOIN ("
-          "SELECT TRANSACTION_ID, SUM(SPLITED_AMOUNT) AS total_split "
-          "FROM SplitwiseTransactions "
-          "WHERE COALESCE(IS_SETTLED, 0) = 0 "
-          "GROUP BY TRANSACTION_ID"
-          ") st ON st.TRANSACTION_ID = t.ID "
-        : '';
+          ? "LEFT JOIN ("
+              "SELECT TRANSACTION_ID, SUM(SPLITED_AMOUNT) AS total_split "
+              "FROM SplitwiseTransactions "
+              "WHERE COALESCE(IS_SETTLED, 0) = 0 "
+              "GROUP BY TRANSACTION_ID"
+              ") st ON st.TRANSACTION_ID = t.ID "
+          : '';
       final amountExpression =
-        type == 1 ? 't.AMOUNT - COALESCE(st.total_split, 0)' : 't.AMOUNT';
+          type == 1 ? 't.AMOUNT - COALESCE(st.total_split, 0)' : 't.AMOUNT';
       final sql = "SELECT "
           "COALESCE(c.CATEGORY_NAME, 'Uncategorized') AS category_name, "
           "COALESCE(s.SUB_CATEGORY_NAME, 'Uncategorized') AS subcategory_name, "
-        "SUM($amountExpression) AS total_amount "
+          "SUM($amountExpression) AS total_amount "
           "FROM Transactions t "
           "LEFT JOIN Category c ON c.ID = t.CATEGORY_ID "
           "LEFT JOIN SubCategory s ON s.ID = t.SUB_CATEGORY_ID "
-        "$splitwiseJoin"
+          "$splitwiseJoin"
           "WHERE t.TRANSCATION_TYPE = $type "
           "AND t.DATE >= ${range.fromTimestamp} "
           "AND t.DATE <= ${range.toTimestamp} "
           "GROUP BY c.CATEGORY_NAME, s.SUB_CATEGORY_NAME "
-        "HAVING SUM($amountExpression) <> 0 "
+          "HAVING SUM($amountExpression) <> 0 "
           "ORDER BY total_amount DESC";
       final result = await service.executeReadQuery(sql);
       final categories = <String, Map<String, double>>{};
@@ -273,7 +275,8 @@ class DirectSqlService {
         final category = values['category_name']?.toString() ?? 'Uncategorized';
         final subcategory =
             values['subcategory_name']?.toString() ?? 'Uncategorized';
-        categories.putIfAbsent(category, () => <String, double>{})[subcategory] =
+        categories.putIfAbsent(
+                category, () => <String, double>{})[subcategory] =
             _toDouble(values['total_amount']);
       }
       return categories.entries
@@ -615,9 +618,7 @@ ORDER BY MCC_CODE ASC
     final results = await service.executeReadQuery(sql);
     final rows = (results['rows'] as List? ?? []);
 
-    return rows
-        .map((row) => Map<String, dynamic>.from(row as Map))
-        .toList();
+    return rows.map((row) => Map<String, dynamic>.from(row as Map)).toList();
   }
 
   static Future<void> deleteMCCCode(int id) async {
@@ -1118,10 +1119,9 @@ WHERE ID = :id
               (isInvestment ? 'Investment' : null)),
       'subCategory':
           isTransfer ? rowMap['to_account_name'] : rowMap['sub_category_name'],
-      'accountId': (isIncome
-              ? rowMap['to_account_id']
-              : rowMap['from_account_id'])
-          ?.toString(),
+      'accountId':
+          (isIncome ? rowMap['to_account_id'] : rowMap['from_account_id'])
+              ?.toString(),
       'accountName':
           isIncome ? rowMap['to_account_name'] : rowMap['from_account_name'],
       'categoryId': rowMap['category_id']?.toString(),
@@ -1182,9 +1182,9 @@ WHERE a.IS_ACTIVE = 1
             'usedAmount': rowMap['CURRENT_BALANCE'],
             'totalLimit': rowMap['CREDIT_CARD_TOTAL_LIMIT'],
             'availableCredit': (_toDouble(rowMap['CREDIT_CARD_TOTAL_LIMIT']) -
-                _toDouble(rowMap['CURRENT_BALANCE']))
-              .clamp(0, double.infinity)
-              .toDouble(),
+                    _toDouble(rowMap['CURRENT_BALANCE']))
+                .clamp(0, double.infinity)
+                .toDouble(),
             'rewardPoints': 0,
             'isActive': true,
             'logo': rowMap['IMG'],
@@ -1230,9 +1230,8 @@ WHERE a.IS_ACTIVE = 1
         'WHERE CREDIT_CARD_ID = $parsedCreditCardId LIMIT 1',
       );
       final rows = result['rows'] as List? ?? const <dynamic>[];
-      final details = rows.isEmpty
-          ? null
-          : Map<String, dynamic>.from(rows.first as Map);
+      final details =
+          rows.isEmpty ? null : Map<String, dynamic>.from(rows.first as Map);
       final billGenerationDate = int.tryParse(
         details?['BILL_GENERATION_DATE']?.toString() ?? '',
       );
@@ -1244,7 +1243,8 @@ WHERE a.IS_ACTIVE = 1
       if (billGenerationDate == null ||
           billGenerationDate < 1 ||
           billGenerationDate > 31) {
-        throw StateError('No valid bill generation date configured for this card');
+        throw StateError(
+            'No valid bill generation date configured for this card');
       }
       return (
         billGenerationDate: billGenerationDate,
@@ -1336,7 +1336,8 @@ WHERE a.IS_ACTIVE = 1
           "JOIN SplitwiseFriends sf ON sf.ID = st.FRIEND_ID "
           "WHERE st.TRANSACTION_ID IN ($inClause) "
           "ORDER BY st.TRANSACTION_ID, sf.NAME";
-      debugPrint('getAllTransactionsAcrossAllTime splitwise SQL:\n$splitwiseSql',
+      debugPrint(
+          'getAllTransactionsAcrossAllTime splitwise SQL:\n$splitwiseSql',
           wrapWidth: 1024);
       final splitwiseResults = await service.executeReadQuery(splitwiseSql);
       final splitwiseRows = (splitwiseResults['rows'] as List? ?? []);
@@ -1350,15 +1351,16 @@ WHERE a.IS_ACTIVE = 1
             splitwiseMap['splitwise_friend_id']?.toString();
         final friendName = splitwiseMap['friend_name']?.toString();
         final splitwiseEntry = {
-          'splitwiseTransactionId': splitwiseMap['splitwise_transaction_id']
-              ?.toString(),
+          'splitwiseTransactionId':
+              splitwiseMap['splitwise_transaction_id']?.toString(),
           'splitedAmount': _toDouble(splitwiseMap['splited_amount']),
           'isSettled': (splitwiseMap['is_settled'] as num?)?.toInt() == 1,
           'friendId': splitwiseFriendId,
           'friendName': friendName,
           'dbFriendId': splitwiseMap['db_friend_id']?.toString(),
         };
-        final existing = splitwiseByTransaction[transactionId] ?? <Map<String, dynamic>>[];
+        final existing =
+            splitwiseByTransaction[transactionId] ?? <Map<String, dynamic>>[];
         existing.add(splitwiseEntry);
         splitwiseByTransaction[transactionId] = existing;
       }
@@ -1593,10 +1595,9 @@ WHERE a.IS_ACTIVE = 1
           .cast<String>()
           .toList();
 
-      final accountIdValue = (isIncome
-              ? rowMap['to_account_id']
-              : rowMap['from_account_id'])
-          ?.toString();
+      final accountIdValue =
+          (isIncome ? rowMap['to_account_id'] : rowMap['from_account_id'])
+              ?.toString();
       final amount = _toDouble(rowMap['amount']);
       final rewards = _toDouble(rowMap['rewards']);
       String rewardsName = '';
@@ -1604,7 +1605,9 @@ WHERE a.IS_ACTIVE = 1
       double rewardsBase = 0;
       double rewardsExtra = rewards;
 
-      if (type == 'expense' && accountIdValue != null && accountIdValue.isNotEmpty) {
+      if (type == 'expense' &&
+          accountIdValue != null &&
+          accountIdValue.isNotEmpty) {
         final parsedAccountId = int.tryParse(accountIdValue);
         if (parsedAccountId != null) {
           final baseCapQuery = "SELECT CAP_PERCENTAGE, REWARD_PER_AMOUNT "
@@ -1701,8 +1704,9 @@ WHERE a.IS_ACTIVE = 1
           (subCategories[subCategoryName] ?? 0) + amount;
     }
 
-    final expenseTransactions =
-      transactions.where((transaction) => transaction.type == 'expense').toList();
+    final expenseTransactions = transactions
+        .where((transaction) => transaction.type == 'expense')
+        .toList();
     for (final transaction in expenseTransactions) {
       addAmount(
         transaction.category ?? '',
@@ -1744,7 +1748,8 @@ WHERE a.IS_ACTIVE = 1
 
     final totalUnsettledSplitwiseExpense = expenseTransactions.fold<double>(
       0,
-      (total, transaction) => total +
+      (total, transaction) =>
+          total +
           (transaction.splitwiseDetails ?? const [])
               .where((detail) => detail is Map && detail['isSettled'] != true)
               .fold<double>(
@@ -1757,31 +1762,28 @@ WHERE a.IS_ACTIVE = 1
     return {
       'monthlyExpenses': monthlyExpenses,
       'totalUnsettledSplitwiseExpense': totalUnsettledSplitwiseExpense,
-      'rawTransactions': expenseTransactions
-          .map((transaction) {
-                final unsettledSplitwiseDetails =
-                    (transaction.splitwiseDetails ?? const [])
-                        .where((detail) =>
-                            detail is Map && detail['isSettled'] != true)
-                        .map((detail) => Map<String, dynamic>.from(detail as Map))
-                        .toList();
-                final unsettledSplitwiseAmount = unsettledSplitwiseDetails.fold<double>(
-                  0,
-                  (total, detail) => total + _toDouble(detail['splitedAmount']),
-                );
-                return {
-                'id': transaction.id,
-                'date': transaction.date,
-                'description': transaction.description,
-                'amount': transaction.amount,
-                'type': 'Expense',
-                'category': transaction.category ?? '',
-                'subCategory': transaction.subCategory ?? '',
-                'unsettledSplitwiseAmount': unsettledSplitwiseAmount,
-                'unsettledSplitwiseDetails': unsettledSplitwiseDetails,
-              };
-            })
-          .toList(),
+      'rawTransactions': expenseTransactions.map((transaction) {
+        final unsettledSplitwiseDetails =
+            (transaction.splitwiseDetails ?? const [])
+                .where((detail) => detail is Map && detail['isSettled'] != true)
+                .map((detail) => Map<String, dynamic>.from(detail as Map))
+                .toList();
+        final unsettledSplitwiseAmount = unsettledSplitwiseDetails.fold<double>(
+          0,
+          (total, detail) => total + _toDouble(detail['splitedAmount']),
+        );
+        return {
+          'id': transaction.id,
+          'date': transaction.date,
+          'description': transaction.description,
+          'amount': transaction.amount,
+          'type': 'Expense',
+          'category': transaction.category ?? '',
+          'subCategory': transaction.subCategory ?? '',
+          'unsettledSplitwiseAmount': unsettledSplitwiseAmount,
+          'unsettledSplitwiseDetails': unsettledSplitwiseDetails,
+        };
+      }).toList(),
       'categories': categories
           .map((category) => {
                 'id': category.id,
@@ -1835,6 +1837,40 @@ WHERE a.IS_ACTIVE = 1
       'total_expense': _toDouble(firstRow['total_expense']),
       'total_investment': _toDouble(firstRow['total_investment']),
     };
+  }
+
+  /// Returns the month's actual cash movements.
+  ///
+  /// Splitwise expenses remain expenses when paid. A later Splitwise
+  /// settlement is stored as type 5 with a negative amount, so it is counted
+  /// as income in the month the repayment was received.
+  static Future<({double income, double expense, double investment})>
+      getMonthlyMoneyFlow(String month, String year) async {
+    final range = _getMonthRangeTimestamps(month, year);
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+
+    final sql = 'SELECT '
+        'COALESCE(SUM(CASE '
+        'WHEN TRANSCATION_TYPE = 2 THEN AMOUNT '
+        'WHEN TRANSCATION_TYPE = 5 THEN -AMOUNT '
+        'ELSE 0 END), 0) AS total_income, '
+        'COALESCE(SUM(CASE WHEN TRANSCATION_TYPE = 1 THEN AMOUNT ELSE 0 END), 0) AS total_expense, '
+        'COALESCE(SUM(CASE WHEN TRANSCATION_TYPE = 4 THEN AMOUNT ELSE 0 END), 0) AS total_investment '
+        'FROM Transactions '
+        'WHERE DATE >= ${range.fromTimestamp} AND DATE <= ${range.toTimestamp}';
+    final results = await service.executeReadQuery(sql);
+    final rows = results['rows'] as List? ?? const [];
+    final values = rows.isEmpty
+        ? const <String, dynamic>{}
+        : Map<String, dynamic>.from(rows.first as Map);
+
+    return (
+      income: _toDouble(values['total_income']),
+      expense: _toDouble(values['total_expense']),
+      investment: _toDouble(values['total_investment']),
+    );
   }
 
   static Future<
@@ -2221,8 +2257,8 @@ WHERE a.IS_ACTIVE = 1
 
     sql += ' GROUP BY cccd.ID, cccd.CREDIT_CARD_ID, cccd.CAP_NAME, '
         'cccd.CAP_TOTAL_AMOUNT, cccd.CAP_PERCENTAGE, '
-      'cccd.IS_BASE_REWARD_CAP, '
-    'cccd.REWARD_PER_AMOUNT, cs.card_current_spend '
+        'cccd.IS_BASE_REWARD_CAP, '
+        'cccd.REWARD_PER_AMOUNT, cs.card_current_spend '
         'ORDER BY cccd.CAP_NAME ASC';
 
     try {
