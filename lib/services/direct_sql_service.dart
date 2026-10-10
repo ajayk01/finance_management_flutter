@@ -1,3 +1,5 @@
+import 'dart:math' show pow;
+
 import 'package:flutter/foundation.dart' hide Category;
 import 'package:finance_app/models/models.dart';
 import 'package:finance_app/services/direct_expense_service.dart';
@@ -753,6 +755,110 @@ VALUES (
     };
 
     await service.executeWriteQuery(sql, params);
+    await service.executeWriteQuery(
+      '''
+INSERT INTO InvestmentAccountDetails (
+    INVESTMENT_ACCOUNT_ID,
+    CURRENT_VALUE,
+    CREATED_DATE
+)
+VALUES (:investmentAccountId, :amount, :createdDate)
+ON DUPLICATE KEY UPDATE
+    CURRENT_VALUE = COALESCE(CURRENT_VALUE, 0) + VALUES(CURRENT_VALUE),
+    CREATED_DATE = COALESCE(CREATED_DATE, VALUES(CREATED_DATE))
+''',
+      {
+        'investmentAccountId': parsedInvestmentAccountId,
+        'amount': amount,
+        'createdDate': (date ?? DateTime.now()).millisecondsSinceEpoch,
+      },
+    );
+  }
+
+  static Future<void> withdrawFromInvestment({
+    required double amount,
+    required String investmentAccountId,
+    required String toBankAccountId,
+    String? notes,
+    DateTime? date,
+  }) async {
+    if (amount <= 0) {
+      throw ArgumentError('Withdrawal amount must be greater than zero');
+    }
+
+    final parsedInvestmentAccountId = int.tryParse(investmentAccountId);
+    if (parsedInvestmentAccountId == null) {
+      throw ArgumentError('Invalid investmentAccountId: $investmentAccountId');
+    }
+    final parsedBankAccountId = int.tryParse(toBankAccountId);
+    if (parsedBankAccountId == null) {
+      throw ArgumentError('Invalid toBankAccountId: $toBankAccountId');
+    }
+    if (parsedInvestmentAccountId == parsedBankAccountId) {
+      throw ArgumentError('Investment and bank accounts must be different');
+    }
+
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+
+    final detailsResult = await service.executeReadQuery(
+      'SELECT CURRENT_VALUE FROM InvestmentAccountDetails '
+      'WHERE INVESTMENT_ACCOUNT_ID = :investmentAccountId',
+      {'investmentAccountId': parsedInvestmentAccountId},
+    );
+    final rows = detailsResult['rows'] as List? ?? const [];
+    final currentValue = rows.isEmpty
+        ? 0.0
+        : _toDouble(
+            Map<String, dynamic>.from(rows.first as Map)['CURRENT_VALUE']);
+    if (amount > currentValue) {
+      throw ArgumentError('Withdrawal amount exceeds the current value');
+    }
+
+    await service.executeWriteQuery(
+      '''
+INSERT INTO Transactions (
+    AMOUNT,
+    TRANSCATION_TYPE,
+    CATEGORY_ID,
+    SUB_CATEGORY_ID,
+    FROM_ACCOUNT_ID,
+    TO_ACCOUNT_ID,
+    NOTES,
+    DATE
+)
+VALUES (
+    :amount,
+    :transactionType,
+    NULL,
+    NULL,
+    :fromAccountId,
+    :toAccountId,
+    :notes,
+    :date
+)
+''',
+      {
+        'amount': amount,
+        'transactionType': 5,
+        'fromAccountId': parsedInvestmentAccountId,
+        'toAccountId': parsedBankAccountId,
+        'notes': (notes ?? 'Investment withdrawal').trim(),
+        'date': (date ?? DateTime.now()).millisecondsSinceEpoch,
+      },
+    );
+    await service.executeWriteQuery(
+      '''
+UPDATE InvestmentAccountDetails
+SET CURRENT_VALUE = CURRENT_VALUE - :amount
+WHERE INVESTMENT_ACCOUNT_ID = :investmentAccountId
+''',
+      {
+        'amount': amount,
+        'investmentAccountId': parsedInvestmentAccountId,
+      },
+    );
   }
 
   static Future<void> updateIncomeTransaction({
@@ -1145,9 +1251,14 @@ SELECT
   a.INITIAL_BALANCE,
   a.ACCOUNT_TYPE,
   a.IMG,
-  ccd.TOTAL_LIMIT AS CREDIT_CARD_TOTAL_LIMIT
+  ccd.TOTAL_LIMIT AS CREDIT_CARD_TOTAL_LIMIT,
+  iad.TOTAL_INVESTED AS INVESTMENT_TOTAL_INVESTED,
+  iad.TOTAL_WITHDRAW AS INVESTMENT_TOTAL_WITHDRAW,
+  iad.CURRENT_VALUE AS INVESTMENT_CURRENT_VALUE,
+  iad.XIRR AS INVESTMENT_XIRR
 FROM Accounts a
 LEFT JOIN CreditCardDetails ccd ON ccd.CREDIT_CARD_ID = a.ID
+LEFT JOIN InvestmentAccountDetails iad ON iad.INVESTMENT_ACCOUNT_ID = a.ID
 WHERE a.IS_ACTIVE = 1
 ''';
     MySqlConfig config = MySqlConfig.fromDotEnv();
@@ -1195,10 +1306,11 @@ WHERE a.IS_ACTIVE = 1
           InvestmentAccount.fromJson({
             'id': rowMap['ID'],
             'name': rowMap['ACCOUNT_NAME'],
-            'totalInvested': rowMap['CURRENT_BALANCE'],
-            'currentValue': 0,
-            'totalWithdraw': 0,
-            'xirr': 0,
+            'totalInvested': rowMap['INVESTMENT_TOTAL_INVESTED'] ??
+                rowMap['CURRENT_BALANCE'],
+            'currentValue': rowMap['INVESTMENT_CURRENT_VALUE'] ?? 0,
+            'totalWithdraw': rowMap['INVESTMENT_TOTAL_WITHDRAW'] ?? 0,
+            'xirr': rowMap['INVESTMENT_XIRR'] ?? 0,
             'isActive': true,
           }),
         );
@@ -1211,6 +1323,199 @@ WHERE a.IS_ACTIVE = 1
       investmentAccounts: investmentAccounts,
     );
   }
+
+  static Future<void> updateInvestmentCurrentValue({
+    required String investmentAccountId,
+    required double currentValue,
+  }) async {
+    final parsedInvestmentAccountId = int.tryParse(investmentAccountId);
+    if (parsedInvestmentAccountId == null) {
+      throw ArgumentError('Invalid investmentAccountId: $investmentAccountId');
+    }
+    if (currentValue < 0) {
+      throw ArgumentError('Current value cannot be negative');
+    }
+
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+    await service.executeWriteQuery(
+      '''
+INSERT INTO InvestmentAccountDetails (INVESTMENT_ACCOUNT_ID, CURRENT_VALUE)
+VALUES (:investmentAccountId, :currentValue)
+ON DUPLICATE KEY UPDATE CURRENT_VALUE = VALUES(CURRENT_VALUE)
+''',
+      {
+        'investmentAccountId': parsedInvestmentAccountId,
+        'currentValue': currentValue,
+      },
+    );
+  }
+
+  static Future<void> updateInvestmentXirr({
+    required String investmentAccountId,
+    required double xirr,
+  }) async {
+    final parsedInvestmentAccountId = int.tryParse(investmentAccountId);
+    if (parsedInvestmentAccountId == null) {
+      throw ArgumentError('Invalid investmentAccountId: $investmentAccountId');
+    }
+    if (!xirr.isFinite) {
+      throw ArgumentError('XIRR must be a finite number');
+    }
+
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+    await service.executeWriteQuery(
+      '''
+UPDATE InvestmentAccountDetails
+SET XIRR = :xirr
+WHERE INVESTMENT_ACCOUNT_ID = :investmentAccountId
+''',
+      {
+        'xirr': xirr,
+        'investmentAccountId': parsedInvestmentAccountId,
+      },
+    );
+  }
+
+  static Future<double> calculateInvestmentXirr(
+    String investmentAccountId,
+  ) async {
+    final parsedInvestmentAccountId = int.tryParse(investmentAccountId);
+    if (parsedInvestmentAccountId == null) {
+      throw ArgumentError('Invalid investmentAccountId: $investmentAccountId');
+    }
+
+    final config = MySqlConfig.fromDotEnv();
+    final service = MySqlService();
+    await service.connect(config);
+    final detailsResult = await service.executeReadQuery(
+      '''
+SELECT CURRENT_VALUE
+FROM InvestmentAccountDetails
+WHERE INVESTMENT_ACCOUNT_ID = :investmentAccountId
+''',
+      {'investmentAccountId': parsedInvestmentAccountId},
+    );
+    final detailRows = detailsResult['rows'] as List? ?? const [];
+    if (detailRows.isEmpty) {
+      throw StateError('Investment account details were not found');
+    }
+
+    final details = Map<String, dynamic>.from(detailRows.first as Map);
+    final currentValue = _toDouble(details['CURRENT_VALUE']);
+    if (currentValue <= 0) {
+      throw StateError(
+        'A positive current value is required to calculate XIRR',
+      );
+    }
+
+    final transactionsResult = await service.executeReadQuery(
+      '''
+SELECT AMOUNT, DATE, TRANSCATION_TYPE
+FROM Transactions
+WHERE (TRANSCATION_TYPE = 4 AND TO_ACCOUNT_ID = :investmentAccountId)
+   OR (TRANSCATION_TYPE = 5 AND FROM_ACCOUNT_ID = :investmentAccountId)
+ORDER BY DATE ASC
+''',
+      {'investmentAccountId': parsedInvestmentAccountId},
+    );
+    final transactionRows = transactionsResult['rows'] as List? ?? const [];
+    final cashFlows = <({double amount, int date})>[];
+    for (final row in transactionRows) {
+      final transaction = Map<String, dynamic>.from(row as Map);
+      final amount = _toDouble(transaction['AMOUNT']);
+      final date = _toDouble(transaction['DATE']).round();
+      final transactionType =
+          _toDouble(transaction['TRANSCATION_TYPE']).round();
+      if (amount == 0 || date <= 0) {
+        continue;
+      }
+      cashFlows.add((
+        amount: transactionType == 4 ? -amount : amount,
+        date: date,
+      ));
+    }
+    cashFlows.add((
+      amount: currentValue,
+      date: DateTime.now().millisecondsSinceEpoch,
+    ));
+
+    final xirr = _solveXirr(cashFlows);
+    final annualizedReturn = xirr * 100;
+
+    await service.executeWriteQuery(
+      '''
+UPDATE InvestmentAccountDetails
+SET XIRR = :xirr
+WHERE INVESTMENT_ACCOUNT_ID = :investmentAccountId
+''',
+      {
+        'xirr': annualizedReturn,
+        'investmentAccountId': parsedInvestmentAccountId,
+      },
+    );
+    return annualizedReturn;
+  }
+
+  static double _solveXirr(List<({double amount, int date})> cashFlows) {
+    if (!cashFlows.any((cashFlow) => cashFlow.amount < 0) ||
+        !cashFlows.any((cashFlow) => cashFlow.amount > 0)) {
+      throw StateError(
+        'XIRR requires at least one investment and one positive cash flow',
+      );
+    }
+
+    final firstDate = cashFlows
+        .map((cashFlow) => cashFlow.date)
+        .reduce((earliest, date) => date < earliest ? date : earliest);
+    double xnpv(double rate) => cashFlows.fold<double>(
+          0,
+          (total, cashFlow) =>
+              total +
+              cashFlow.amount /
+                  pow(
+                    1 + rate,
+                    (cashFlow.date - firstDate) /
+                        Duration.millisecondsPerDay /
+                        365,
+                  ),
+        );
+
+    var lowerRate = -0.9999;
+    var upperRate = 1.0;
+    var lowerValue = xnpv(lowerRate);
+    var upperValue = xnpv(upperRate);
+
+    while (!_hasOppositeSigns(lowerValue, upperValue) && upperRate < 1000000) {
+      upperRate = upperRate * 2 + 1;
+      upperValue = xnpv(upperRate);
+    }
+    if (!_hasOppositeSigns(lowerValue, upperValue)) {
+      throw StateError('Could not find a valid XIRR for these cash flows');
+    }
+
+    for (var iteration = 0; iteration < 100; iteration++) {
+      final rate = (lowerRate + upperRate) / 2;
+      final value = xnpv(rate);
+      if (value.abs() < 0.000001) {
+        return rate;
+      }
+      if (_hasOppositeSigns(lowerValue, value)) {
+        upperRate = rate;
+        upperValue = value;
+      } else {
+        lowerRate = rate;
+        lowerValue = value;
+      }
+    }
+    return (lowerRate + upperRate) / 2;
+  }
+
+  static bool _hasOppositeSigns(double first, double second) =>
+      first == 0 || second == 0 || (first < 0) != (second < 0);
 
   static Future<({int billGenerationDate, DateTime createdDate})>
       getCreditCardStatementInfo(

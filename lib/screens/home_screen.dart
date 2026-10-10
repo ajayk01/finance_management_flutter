@@ -259,6 +259,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         _selectedNavIndex = 1;
                       });
                     },
+                    onInvestmentTap: () =>
+                        setState(() => _selectedNavIndex = 2),
                   ),
                   const SizedBox(height: 28),
                   MonthlyBudget(

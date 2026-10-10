@@ -8,6 +8,7 @@ class AccountCard extends StatefulWidget
   final List<CreditCardAccount> creditCards;
   final List<InvestmentAccount> investmentAccounts;
   final void Function(String accountName)? onAccountTap;
+  final VoidCallback? onInvestmentTap;
 
   const AccountCard({
     super.key,
@@ -15,6 +16,7 @@ class AccountCard extends StatefulWidget
     this.creditCards = const [],
     this.investmentAccounts = const [],
     this.onAccountTap,
+    this.onInvestmentTap,
   });
 
   @override
@@ -108,9 +110,12 @@ class _AccountCardState extends State<AccountCard> {
     final fallbackIcon = page['icon'] as IconData;
     final title = page['title'] as String;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: title == 'Investment' ? widget.onInvestmentTap : null,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Container(
         width: double.infinity,
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -212,11 +217,6 @@ class _AccountCardState extends State<AccountCard> {
                             ),
                           ),
                         ),
-                        Icon(
-                          Icons.more_vert,
-                          color: Colors.white.withValues(alpha: 0.7),
-                          size: 22,
-                        ),
                       ],
                     ),
                     const SizedBox(height: 20),
@@ -228,7 +228,11 @@ class _AccountCardState extends State<AccountCard> {
                             return Column(
                               children: [
                                 GestureDetector(
-                                  onTap: () => widget.onAccountTap?.call(accounts[index]['name']!),
+                                  onTap: title == 'Investment'
+                                      ? widget.onInvestmentTap
+                                      : () => widget.onAccountTap?.call(
+                                            accounts[index]['name']!,
+                                          ),
                                   child: _buildAccountRow(
                                     fallbackIcon,
                                     accounts[index]['name']!,
@@ -248,6 +252,7 @@ class _AccountCardState extends State<AccountCard> {
               ),
             ),
           ],
+        ),
         ),
       ),
     );

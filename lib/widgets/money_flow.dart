@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../utils/currency_formatter.dart';
 
 class _FlowItem {
@@ -21,35 +22,50 @@ class MoneyFlow extends StatelessWidget {
   final double income;
   final double expense;
   final double investment;
+  final DateTime selectedPeriod;
+  final ValueChanged<DateTime> onPeriodChanged;
+  final bool loading;
+  final String? errorMessage;
 
   const MoneyFlow({
     super.key,
-    this.income = 5300,
-    this.expense = 3900,
-    this.investment = 1200,
+    required this.income,
+    required this.expense,
+    required this.investment,
+    required this.selectedPeriod,
+    required this.onPeriodChanged,
+    this.loading = false,
+    this.errorMessage,
   });
 
   List<_FlowItem> get _data => [
         _FlowItem(
-          category: 'Expense',
-          amount: expense,
-          color: const Color(0xFFE53935),
-          icon: Icons.arrow_upward,
-          iconBg: const Color(0xFFFEECEC),
-        ),
-        _FlowItem(
-          category: 'Income',
+          category: 'Total income',
           amount: income,
           color: const Color(0xFF2ECC71),
           icon: Icons.arrow_downward,
           iconBg: const Color(0xFFE8F8F0),
         ),
         _FlowItem(
-          category: 'Investments',
+          category: 'Total expense',
+          amount: expense,
+          color: const Color(0xFFE53935),
+          icon: Icons.arrow_upward,
+          iconBg: const Color(0xFFFEECEC),
+        ),
+        _FlowItem(
+          category: 'Total investment',
           amount: investment,
           color: const Color(0xFF00695C),
           icon: Icons.trending_up,
           iconBg: const Color(0xFFE0F2F1),
+        ),
+        _FlowItem(
+          category: 'Net change',
+          amount: income - expense - investment,
+          color: const Color(0xFF1565C0),
+          icon: Icons.account_balance_wallet_outlined,
+          iconBg: const Color(0xFFE3F2FD),
         ),
       ];
 
@@ -69,13 +85,9 @@ class MoneyFlow extends StatelessWidget {
                 color: Colors.grey.shade900,
               ),
             ),
-            Text(
-              'May 2026',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: Colors.grey.shade500,
-              ),
+            _PeriodSelector(
+              selectedPeriod: selectedPeriod,
+              onChanged: loading ? null : onPeriodChanged,
             ),
           ],
         ),
@@ -126,8 +138,25 @@ class MoneyFlow extends StatelessWidget {
                 ),
               ),
               Divider(height: 1, color: Colors.grey.shade200),
-              // Table rows
-              ..._data.map((item) => _buildRow(item)),
+              if (loading)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else ...[
+                ..._data.map((item) => _buildRow(item)),
+                if (errorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                    child: Text(
+                      errorMessage!,
+                      style: const TextStyle(
+                        color: Color(0xFFC62828),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+              ],
             ],
           ),
         ),
@@ -175,6 +204,72 @@ class MoneyFlow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _PeriodSelector extends StatelessWidget {
+  const _PeriodSelector({
+    required this.selectedPeriod,
+    required this.onChanged,
+  });
+
+  final DateTime selectedPeriod;
+  final ValueChanged<DateTime>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final currentYear = DateTime.now().year;
+    final years = List.generate(currentYear - 1999, (index) => 2000 + index);
+    final textStyle = TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w500,
+      color: Colors.grey.shade600,
+    );
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DropdownButtonHideUnderline(
+          child: DropdownButton<int>(
+            value: selectedPeriod.month,
+            isDense: true,
+            style: textStyle,
+            items: List.generate(
+              12,
+              (index) => DropdownMenuItem(
+                value: index + 1,
+                child:
+                    Text(DateFormat('MMM').format(DateTime(2000, index + 1))),
+              ),
+            ),
+            onChanged: (month) {
+              if (month != null && onChanged != null) {
+                onChanged!(DateTime(selectedPeriod.year, month));
+              }
+            },
+          ),
+        ),
+        const SizedBox(width: 4),
+        DropdownButtonHideUnderline(
+          child: DropdownButton<int>(
+            value: selectedPeriod.year,
+            isDense: true,
+            style: textStyle,
+            items: years
+                .map((year) => DropdownMenuItem(
+                      value: year,
+                      child: Text(year.toString()),
+                    ))
+                .toList(),
+            onChanged: (year) {
+              if (year != null && onChanged != null) {
+                onChanged!(DateTime(year, selectedPeriod.month));
+              }
+            },
+          ),
+        ),
+      ],
     );
   }
 }
